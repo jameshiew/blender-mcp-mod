@@ -6,10 +6,130 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use regex::Regex;
+use rustpython_parser::{Parse, ast};
 
 pub const PROTOCOL_VERSION: u64 = 7;
 pub const SOURCE: &str = include_str!("../addon.py");
 const FILENAME: &str = "blendermcp.py";
+
+#[derive(Debug)]
+struct AddonMetadata {
+    version: Option<Vec<u64>>,
+    build_version: Option<String>,
+    protocol: Option<u64>,
+}
+
+impl AddonMetadata {
+    fn release_version(&self) -> Result<Option<semver::Version>> {
+        if let Some(version) = &self.build_version {
+            return Ok(Some(semver::Version::parse(version).context(
+                "Invalid ADDON_VERSION; leaving installation unchanged",
+            )?));
+        }
+        let Some(version) = &self.version else {
+            return Ok(None);
+        };
+        ensure!(
+            version.len() <= 3,
+            "Unsupported add-on version; leaving installation unchanged"
+        );
+        Ok(Some(semver::Version::new(
+            version[0],
+            *version.get(1).unwrap_or(&0),
+            *version.get(2).unwrap_or(&0),
+        )))
+    }
+}
+
+fn string(expression: &ast::Expr) -> Option<&str> {
+    if let ast::Expr::Constant(value) = expression
+        && let ast::Constant::Str(value) = &value.value
+    {
+        return Some(value);
+    }
+    None
+}
+
+fn integer(expression: &ast::Expr) -> Option<u64> {
+    if let ast::Expr::Constant(value) = expression
+        && let ast::Constant::Int(value) = &value.value
+    {
+        return value.to_string().parse().ok();
+    }
+    None
+}
+
+fn metadata(source: &str) -> Option<AddonMetadata> {
+    let statements = ast::Suite::parse(source, "<addon>").ok()?;
+    let assignment = |name: &str| {
+        statements.iter().rev().find_map(|statement| {
+            if let ast::Stmt::Assign(assign) = statement
+                && assign.targets.iter().any(|target| {
+                    matches!(target, ast::Expr::Name(target) if target.id.as_str() == name)
+                })
+            {
+                return Some(assign.value.as_ref());
+            }
+            None
+        })
+    };
+    let ast::Expr::Dict(info) = assignment("bl_info")? else {
+        return None;
+    };
+    if info.keys.iter().any(Option::is_none) {
+        return None;
+    }
+    let field = |name: &str| {
+        info.keys
+            .iter()
+            .zip(&info.values)
+            .rev()
+            .find_map(|(key, value)| (key.as_ref().and_then(string) == Some(name)).then_some(value))
+    };
+    if !matches!(
+        string(field("name")?),
+        Some("MCP for Blender" | "Blender MCP")
+    ) {
+        return None;
+    }
+    let version = match field("version") {
+        Some(ast::Expr::Tuple(tuple)) if !tuple.elts.is_empty() => {
+            Some(tuple.elts.iter().map(integer).collect::<Option<Vec<_>>>()?)
+        }
+        Some(_) => return None,
+        None => None,
+    };
+    let build_version = match assignment("ADDON_VERSION") {
+        Some(value) => Some(string(value)?.to_owned()),
+        None => None,
+    };
+    let protocol = match assignment("ADDON_PROTOCOL_VERSION") {
+        Some(value) => Some(integer(value)?),
+        None => None,
+    };
+    Some(AddonMetadata {
+        version,
+        build_version,
+        protocol,
+    })
+}
+
+pub fn installed_version(path: &Path) -> Result<String> {
+    let info = metadata(&fs::read_to_string(path)?)
+        .context("Cannot read literal add-on version metadata")?;
+    Ok(info.build_version.unwrap_or_else(|| {
+        info.version.map_or_else(
+            || "legacy (unversioned)".into(),
+            |version| {
+                version
+                    .iter()
+                    .map(u64::to_string)
+                    .collect::<Vec<_>>()
+                    .join(".")
+            },
+        )
+    }))
+}
 
 fn expand_home(path: PathBuf) -> Result<PathBuf> {
     if path == Path::new("~") {
@@ -71,11 +191,7 @@ fn is_addon(path: &Path) -> bool {
     let Ok(text) = fs::read_to_string(path) else {
         return false;
     };
-    Regex::new(
-        r#"(?s)\bbl_info\s*=\s*\{[^}]*["']name["']\s*:\s*["'](?:MCP for Blender|Blender MCP)["']"#,
-    )
-    .expect("constant regex")
-    .is_match(&text)
+    metadata(&text).is_some()
 }
 
 pub fn existing(dirs: &[PathBuf]) -> Result<Vec<PathBuf>> {
@@ -105,15 +221,31 @@ pub fn existing(dirs: &[PathBuf]) -> Result<Vec<PathBuf>> {
     Ok(found)
 }
 
-fn replace(path: &Path) -> Result<()> {
+fn prepare_replacement(path: &Path) -> Result<Option<tempfile::NamedTempFile>> {
     if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
         bail!("Refusing to overwrite symlink {}", path.display());
     }
     if path.exists() {
         let old = fs::read(path).with_context(|| format!("Cannot read {}", path.display()))?;
         if old == SOURCE.as_bytes() {
-            return Ok(());
+            return Ok(None);
         }
+        let installed = metadata(std::str::from_utf8(&old)?)
+            .context("Refusing to replace an unrecognized add-on")?;
+        let bundled = metadata(SOURCE).context("Invalid bundled add-on metadata")?;
+        let bundled_version = bundled
+            .release_version()?
+            .context("Missing bundled version")?;
+        ensure!(
+            installed
+                .release_version()?
+                .is_none_or(|version| !version.cmp_precedence(&bundled_version).is_gt())
+                && installed
+                    .protocol
+                    .is_none_or(|version| version <= PROTOCOL_VERSION),
+            "{} is newer than this build; leaving it unchanged",
+            path.display()
+        );
         let mut suffix = 0;
         loop {
             let backup = path.with_extension(if suffix == 0 {
@@ -146,10 +278,7 @@ fn replace(path: &Path) -> Result<()> {
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     temporary.write_all(SOURCE.as_bytes())?;
     temporary.as_file().sync_all()?;
-    temporary
-        .persist(path)
-        .with_context(|| format!("Cannot install add-on at {}", path.display()))?;
-    Ok(())
+    Ok(Some(temporary))
 }
 
 pub fn install(directory: Option<PathBuf>) -> Result<Vec<PathBuf>> {
@@ -161,9 +290,12 @@ pub fn install(directory: Option<PathBuf>) -> Result<Vec<PathBuf>> {
         !directories.is_empty(),
         "No Blender add-on directory found; use install-addon --addons-dir PATH"
     );
-    let mut targets = existing(&directories)?;
-    if let Some(first) = targets.first().cloned() {
-        targets.retain(|path| path.parent() == first.parent());
+    let mut targets = Vec::new();
+    for directory in &directories {
+        targets = existing(std::slice::from_ref(directory))?;
+        if !targets.is_empty() {
+            break;
+        }
     }
     if targets.is_empty() {
         let directory = &directories[0];
@@ -176,8 +308,16 @@ pub fn install(directory: Option<PathBuf>) -> Result<Vec<PathBuf>> {
         );
         targets.push(target);
     }
-    for target in &targets {
-        replace(target)?;
+    let prepared = targets
+        .iter()
+        .map(|target| prepare_replacement(target))
+        .collect::<Result<Vec<_>>>()?;
+    for (target, temporary) in targets.iter().zip(prepared) {
+        if let Some(temporary) = temporary {
+            temporary
+                .persist(target)
+                .with_context(|| format!("Cannot install add-on at {}", target.display()))?;
+        }
     }
     Ok(targets)
 }
@@ -253,8 +393,56 @@ mod tests {
     }
 
     #[test]
+    fn ignores_metadata_in_comments_strings_and_nested_scopes() {
+        for source in [
+            "# bl_info = {'name': 'Blender MCP'}\n",
+            "example = \"bl_info = {'name': 'Blender MCP'}\"\n",
+            "example = \"\"\"\nbl_info = {'name': 'Blender MCP'}\n\"\"\"\n",
+            "def example():\n    bl_info = {'name': 'Blender MCP'}\n",
+            "bl_info = {'description': {'name': 'Blender MCP'}, 'name': 'Other'}\n",
+            "bl_info = {'description': \"'name': 'Blender MCP'\", 'name': 'Other'}\n",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let unrelated = directory.path().join("other.py");
+            fs::write(&unrelated, source).unwrap();
+            install(Some(directory.path().into())).unwrap();
+            assert_eq!(fs::read_to_string(&unrelated).unwrap(), source);
+            assert!(!unrelated.with_extension("py.bak").exists());
+            assert!(directory.path().join(FILENAME).exists());
+        }
+    }
+
+    #[test]
+    fn updates_all_installations_in_the_selected_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let package = directory.path().join("a_package");
+        fs::create_dir(&package).unwrap();
+        let targets = [package.join("__init__.py"), directory.path().join(FILENAME)];
+        for target in &targets {
+            fs::write(target, "bl_info = {'name': 'Blender MCP'}").unwrap();
+        }
+        assert_eq!(install(Some(directory.path().into())).unwrap(), targets);
+        for target in targets {
+            assert_eq!(fs::read_to_string(target).unwrap(), SOURCE);
+        }
+    }
+
+    #[test]
     fn embedded_addon_has_matching_protocol_and_no_recording() {
-        assert!(SOURCE.contains(&format!("ADDON_PROTOCOL_VERSION = {PROTOCOL_VERSION}")));
+        let info = metadata(SOURCE).unwrap();
+        assert_eq!(info.protocol, Some(PROTOCOL_VERSION));
+        assert_eq!(
+            info.build_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(
+            info.version,
+            Some(vec![
+                env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
+                env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
+                env!("CARGO_PKG_VERSION_PATCH").parse().unwrap(),
+            ])
+        );
         for removed in [
             "telemetry",
             "trajectory",
@@ -263,6 +451,55 @@ mod tests {
             "drain_human_activity",
         ] {
             assert!(!SOURCE.contains(removed), "{removed}");
+        }
+    }
+
+    #[test]
+    fn refuses_newer_versions_before_replacing_any_installation() {
+        for newer in [
+            "bl_info = {'name': 'Blender MCP', 'version': (2, 0, 0)}",
+            "bl_info = {'name': 'Blender MCP', 'version': (1, 6)}\nADDON_VERSION = '2.0.0+mod'",
+            "bl_info = {'name': 'Blender MCP', 'version': (1, 9, 1)}\nADDON_PROTOCOL_VERSION = 8",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let older = directory.path().join("a.py");
+            let target = directory.path().join(FILENAME);
+            let previous = "bl_info = {'name': 'Blender MCP', 'version': (1, 6)}";
+            fs::write(&older, previous).unwrap();
+            fs::write(&target, newer).unwrap();
+            let error = install(Some(directory.path().into())).unwrap_err();
+            assert!(error.to_string().contains("newer"));
+            assert_eq!(fs::read_to_string(&older).unwrap(), previous);
+            assert_eq!(fs::read_to_string(&target).unwrap(), newer);
+        }
+    }
+
+    #[test]
+    fn reports_full_build_version_and_legacy_numeric_version() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join(FILENAME);
+        fs::write(
+            &target,
+            "bl_info = {'name': 'Blender MCP', 'version': (1, 6)}",
+        )
+        .unwrap();
+        assert_eq!(installed_version(&target).unwrap(), "1.6");
+        install(Some(directory.path().into())).unwrap();
+        assert_eq!(installed_version(&target).unwrap(), "1.9.1+mod");
+    }
+
+    #[test]
+    fn compares_release_precedence_without_ordering_build_labels() {
+        for version in ["1.9.1+upstream", "1.9.1-alpha+mod", "1.9.0+mod"] {
+            let directory = tempfile::tempdir().unwrap();
+            let target = directory.path().join(FILENAME);
+            fs::write(
+                &target,
+                format!("bl_info = {{'name': 'Blender MCP'}}\nADDON_VERSION = '{version}'"),
+            )
+            .unwrap();
+            install(Some(directory.path().into())).unwrap();
+            assert_eq!(installed_version(&target).unwrap(), "1.9.1+mod");
         }
     }
 }

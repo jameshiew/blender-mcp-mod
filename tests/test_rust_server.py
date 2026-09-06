@@ -116,7 +116,8 @@ class Client:
         elif name == "get_addon_info":
             result = {
                 "protocol_version": 7,
-                "addon_version": [1, 6],
+                "addon_version": [1, 9, 1],
+                "addon_build_version": "1.9.1+mod",
                 "capabilities": ["execute_code"],
                 "blender_version": "test",
             }
@@ -411,3 +412,16 @@ def test_installer_binary_contains_addon(binary, tmp_path):
     assert (tmp_path / "blendermcp.py").read_bytes() == (
         REPO_ROOT / "addon.py"
     ).read_bytes()
+
+
+@pytest.mark.parametrize("version", [None, "1.6.0", "1.9.1", "1.9.1+mod"])
+def test_addon_status_checks_build_version(client, version):
+    result = {"protocol_version": 7, "addon_version": [1, 9, 1]}
+    if version is not None:
+        result["addon_build_version"] = version
+    client.respond = lambda command: {"status": "success", "result": result}
+
+    status = json.loads(client.call("get_addon_status", {})["content"][0]["text"])
+
+    assert status["up_to_date"] is (version == "1.9.1+mod")
+    assert status["expected_addon_version"] == "1.9.1+mod"

@@ -36,7 +36,11 @@ async fn main() -> Result<()> {
             let directory = security::directory()?;
             security::setup(&directory)?;
             for path in addon::install(addons_dir)? {
-                println!("Installed {}", path.display());
+                println!(
+                    "Installed {} ({})",
+                    path.display(),
+                    addon::installed_version(&path)?
+                );
             }
             println!("Restart Blender or disable and enable the add-on, then Start MCP Server.");
         }
@@ -56,7 +60,11 @@ async fn main() -> Result<()> {
                 );
             }
             for path in addon::existing(&directories)? {
-                println!("Installed: {}", path.display());
+                println!(
+                    "Installed: {} ({})",
+                    path.display(),
+                    addon::installed_version(&path)?
+                );
             }
             anyhow::ensure!(
                 !directories.is_empty(),

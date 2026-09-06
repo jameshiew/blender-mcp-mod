@@ -317,10 +317,12 @@ pub async fn execute(
     if name == "get_addon_status" {
         ensure!(result.is_object(), "Invalid add-on information");
         result["expected_protocol_version"] = json!(PROTOCOL_VERSION);
+        result["expected_addon_version"] = json!(env!("CARGO_PKG_VERSION"));
         result["up_to_date"] = json!(
             result["protocol_version"]
                 .as_u64()
                 .is_some_and(|v| v >= PROTOCOL_VERSION)
+                && result["addon_build_version"] == env!("CARGO_PKG_VERSION")
         );
         result["update_command"] = json!("blender-mcp install-addon");
         result["after_install"] =
