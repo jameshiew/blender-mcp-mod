@@ -1939,7 +1939,9 @@ class BlenderMCPServer:
                         )
 
                         # Unparent the mesh from the empty node
+                        world_matrix = potential_mesh.matrix_world.copy()
                         potential_mesh.parent = None
+                        potential_mesh.matrix_world = world_matrix
 
                         # Remove the empty node
                         bpy.data.objects.remove(parent_obj)
@@ -2049,6 +2051,8 @@ class BlenderMCPServer:
             return {"succeed": True, **result}
         except Exception as e:
             return {"succeed": False, "error": str(e)}
+        finally:
+            os.unlink(temp_file.name)
 
     def import_generated_asset_fal_ai(self, request_id: str, name: str):
         """Fetch the generated asset, import into blender"""
@@ -2109,6 +2113,8 @@ class BlenderMCPServer:
             return {"succeed": True, **result}
         except Exception as e:
             return {"succeed": False, "error": str(e)}
+        finally:
+            os.unlink(temp_file.name)
 
     # endregion
 
@@ -3240,18 +3246,10 @@ class BlenderMCPServer:
             if response.status_code != 200:
                 return {"error": f"Generation failed: {response.text}"}
 
-            # Decode base64 and save to temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".glb") as temp_file:
-                temp_file.write(response.content)
-                temp_file_name = temp_file.name
-
-            # Import the GLB file in the main thread
-            def import_handler():
-                bpy.ops.import_scene.gltf(filepath=temp_file_name)
-                os.unlink(temp_file.name)
-                return None
-
-            bpy.app.timers.register(import_handler)
+            with tempfile.TemporaryDirectory() as temporary:
+                temp_file = Path(temporary) / "model.glb"
+                temp_file.write_bytes(response.content)
+                bpy.ops.import_scene.gltf(filepath=str(temp_file))
 
             return {"status": "DONE", "message": "Generation and Import glb succeeded"}
         except Exception as e:
