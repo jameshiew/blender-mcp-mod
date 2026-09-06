@@ -519,7 +519,11 @@ class BlenderMCPServer:
                                 continue
                         else:
                             break
-                        client.sendall(response)
+                        try:
+                            client.sendall(response)
+                        except OSError as e:
+                            print(f"Error sending response: {e}")
+                            break
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         # Incomplete data, wait for more. A multi-byte UTF-8
                         # character can land split across a recv() chunk
