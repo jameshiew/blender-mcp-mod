@@ -121,12 +121,12 @@ pub async fn prepare(
             "create_rodin_job"
         }
         "poll_rodin_job_status" => {
-            exactly_one(&args, "subscription_key", "request_id")?;
+            select_identifier(&mut args, "subscription_key", "request_id")?;
             args.retain(|_, value| !value.is_null());
             name
         }
         "import_generated_asset" => {
-            exactly_one(&args, "task_uuid", "request_id")?;
+            select_identifier(&mut args, "task_uuid", "request_id")?;
             args.retain(|_, value| !value.is_null());
             name
         }
@@ -152,11 +152,17 @@ fn nonempty(value: &Value) -> bool {
     value.as_str().is_some_and(|s| !s.trim().is_empty())
 }
 
-fn exactly_one(args: &Map<String, Value>, first: &str, second: &str) -> Result<()> {
+fn select_identifier(args: &mut Map<String, Value>, first: &str, second: &str) -> Result<()> {
     ensure!(
         nonempty(&args[first]) ^ nonempty(&args[second]),
         "Provide exactly one of {first} and {second}"
     );
+    let unused = if nonempty(&args[first]) {
+        second
+    } else {
+        first
+    };
+    args.remove(unused);
     Ok(())
 }
 
@@ -297,6 +303,18 @@ pub async fn execute(
 ) -> Result<CallToolResult> {
     let (command, params) = prepare(name, args, safe_mode).await?;
     let mut result = connection.send(&command, params).await?;
+    if matches!(
+        command.as_str(),
+        "create_hunyuan_job" | "poll_hunyuan_job_status"
+    ) && let Some(error) = result["Response"]
+        .get("Error")
+        .filter(|error| !error.is_null())
+    {
+        bail!(
+            "Hunyuan3D: {error}; request ID: {}",
+            result["Response"]["RequestId"]
+        );
+    }
     if name == "get_viewport_screenshot" || name == "get_sketchfab_model_preview" {
         let data = result["image_data"].as_str().context(
             "Add-on did not return image data; run blender-mcp install-addon and restart Blender",
