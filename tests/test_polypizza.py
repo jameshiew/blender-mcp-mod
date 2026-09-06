@@ -8,6 +8,7 @@ a GLB when it does not like the caller's IP.
 
 Every request here is mocked; the suite never touches the network.
 """
+
 import importlib.util
 import sys
 import types
@@ -89,7 +90,13 @@ def _load_addon(monkeypatch, scene, selected_objects=()):
     )
 
     props = types.ModuleType("bpy.props")
-    for name in ("BoolProperty", "EnumProperty", "FloatProperty", "IntProperty", "StringProperty"):
+    for name in (
+        "BoolProperty",
+        "EnumProperty",
+        "FloatProperty",
+        "IntProperty",
+        "StringProperty",
+    ):
         setattr(props, name, lambda **_kwargs: None)
     bpy.props = props
 
@@ -151,7 +158,9 @@ def _record_requests(monkeypatch, addon, responses):
     queue = list(responses)
 
     def fake_get(url, headers=None, params=None, timeout=None):
-        calls.append({"url": url, "headers": dict(headers or {}), "params": dict(params or {})})
+        calls.append(
+            {"url": url, "headers": dict(headers or {}), "params": dict(params or {})}
+        )
         return queue.pop(0)
 
     monkeypatch.setattr(addon.requests, "get", fake_get, raising=False)
@@ -159,6 +168,7 @@ def _record_requests(monkeypatch, addon, responses):
 
 
 # --- filter building ---------------------------------------------------------
+
 
 def test_filters_are_capitalized_and_numeric(monkeypatch):
     addon, _ = _server(monkeypatch)
@@ -229,6 +239,7 @@ def test_limit_and_page_are_capitalized_and_limit_clamped(monkeypatch):
 
 # --- unfiltered search -------------------------------------------------------
 
+
 def test_bare_search_without_filters_is_rejected_before_the_network(monkeypatch):
     addon, server = _server(monkeypatch)
 
@@ -257,9 +268,12 @@ def test_filter_only_search_uses_the_bare_endpoint(monkeypatch):
 
 # --- response parsing --------------------------------------------------------
 
+
 def test_parser_reads_tri_count_and_licence(monkeypatch):
     addon, server = _server(monkeypatch)
-    _record_requests(monkeypatch, addon, [FakeResponse(payload={"total": 262, "results": [CHAIR]})])
+    _record_requests(
+        monkeypatch, addon, [FakeResponse(payload={"total": 262, "results": [CHAIR]})]
+    )
 
     result = server.search_polypizza_models(query="chair")
 
@@ -277,7 +291,9 @@ def test_parser_reads_tri_count_and_licence(monkeypatch):
 def test_parser_survives_missing_optional_fields(monkeypatch):
     addon, server = _server(monkeypatch)
     sparse = {"ID": "abc", "Title": "Thing"}
-    _record_requests(monkeypatch, addon, [FakeResponse(payload={"total": 1, "results": [sparse]})])
+    _record_requests(
+        monkeypatch, addon, [FakeResponse(payload={"total": 1, "results": [sparse]})]
+    )
 
     row = server.search_polypizza_models(query="thing")["results"][0]
 
@@ -289,6 +305,7 @@ def test_parser_survives_missing_optional_fields(monkeypatch):
 
 # --- the CDN -----------------------------------------------------------------
 
+
 def test_cloudflare_challenge_gets_its_own_error(monkeypatch):
     addon, server = _server(monkeypatch)
     _record_requests(
@@ -299,7 +316,10 @@ def test_cloudflare_challenge_gets_its_own_error(monkeypatch):
             FakeResponse(
                 status_code=403,
                 content=CLOUDFLARE_CHALLENGE_BODY,
-                headers={"cf-mitigated": "challenge", "Content-Type": "text/html; charset=UTF-8"},
+                headers={
+                    "cf-mitigated": "challenge",
+                    "Content-Type": "text/html; charset=UTF-8",
+                },
             ),
         ],
     )
@@ -320,7 +340,10 @@ def test_non_glb_body_without_cloudflare_headers_is_still_flagged(monkeypatch):
     _record_requests(
         monkeypatch,
         addon,
-        [FakeResponse(payload=CHAIR), FakeResponse(status_code=200, content=b"not a glb at all")],
+        [
+            FakeResponse(payload=CHAIR),
+            FakeResponse(status_code=200, content=b"not a glb at all"),
+        ],
     )
 
     result = server.download_polypizza_model("iMNqRzPwwe")
@@ -355,6 +378,7 @@ def test_api_key_is_never_sent_to_the_cdn(monkeypatch):
 
 # --- attribution -------------------------------------------------------------
 
+
 def test_attribution_is_written_onto_the_imported_object(monkeypatch):
     root = FakeObject("Chair")
     addon, server = _server(monkeypatch, selected_objects=[root])
@@ -378,6 +402,7 @@ def test_attribution_is_written_onto_the_imported_object(monkeypatch):
 
 # --- wiring ------------------------------------------------------------------
 
+
 def test_disabled_polypizza_hides_the_commands_but_keeps_status(monkeypatch):
     addon, server = _server(monkeypatch, polypizza_enabled=False)
 
@@ -392,7 +417,10 @@ def test_disabled_polypizza_hides_the_commands_but_keeps_status(monkeypatch):
 
     assert status["enabled"] is False
     assert "currently disabled" in status["message"]
-    assert search == {"status": "error", "message": "Unknown command type: search_polypizza_models"}
+    assert search == {
+        "status": "error",
+        "message": "Unknown command type: search_polypizza_models",
+    }
     assert status_command["status"] == "success"
 
 

@@ -82,8 +82,7 @@ ALLOWED_SCRIPTS = {
         "img = bpy.data.images.load('/tmp/tex.png')\n"
     ),
     "open_mainfile": (
-        "import bpy\n"
-        "bpy.ops.wm.open_mainfile(filepath='/tmp/other.blend')\n"
+        "import bpy\nbpy.ops.wm.open_mainfile(filepath='/tmp/other.blend')\n"
     ),
     "bmesh_and_math": (
         "import bpy\n"
@@ -181,15 +180,10 @@ BLOCKED_SCRIPTS = {
     "from_bpy_import": "from bpy import ops\nops.wm.append(filepath='/tmp/evil.blend')",
     "alias_ops_namespace": "import bpy\no = bpy.ops\no.wm.append(filepath='/tmp/evil.blend')",
     "namespace_as_argument": (
-        "import bpy\n"
-        "def f(m):\n"
-        "    m.wm.link(filepath='/tmp/evil.blend')\n"
-        "f(bpy.ops)\n"
+        "import bpy\ndef f(m):\n    m.wm.link(filepath='/tmp/evil.blend')\nf(bpy.ops)\n"
     ),
     "module_in_container": (
-        "import bpy\n"
-        "x = [bpy]\n"
-        "x[0].ops.wm.append(filepath='/tmp/evil.blend')\n"
+        "import bpy\nx = [bpy]\nx[0].ops.wm.append(filepath='/tmp/evil.blend')\n"
     ),
     "getattr_namespace": "import bpy\no = getattr(bpy, 'ops')",
     "shadow_bpy": "import bpy\nbpy = None",

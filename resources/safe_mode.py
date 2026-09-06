@@ -71,7 +71,12 @@ SAFE_MODE_ENV: Final[str] = "BLENDER_MCP_SAFE_MODE"
 
 def safe_mode_enabled() -> bool:
     """True when the user has opted in via BLENDER_MCP_SAFE_MODE."""
-    return os.environ.get(SAFE_MODE_ENV, "").strip().lower() in ("true", "1", "yes", "on")
+    return os.environ.get(SAFE_MODE_ENV, "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+        "on",
+    )
 
 
 class SandboxViolation(Exception):
@@ -169,24 +174,77 @@ _DENIED_IMPORT_NAMES: Final[frozenset[str]] = frozenset(
 ALLOWED_BUILTINS: Final[frozenset[str]] = frozenset(
     {
         # constructors / conversions
-        "bool", "int", "float", "complex", "str", "bytes", "bytearray",
-        "list", "tuple", "set", "frozenset", "dict", "slice",
+        "bool",
+        "int",
+        "float",
+        "complex",
+        "str",
+        "bytes",
+        "bytearray",
+        "list",
+        "tuple",
+        "set",
+        "frozenset",
+        "dict",
+        "slice",
         # numeric
-        "abs", "round", "min", "max", "sum", "pow", "divmod",
-        "hex", "oct", "bin", "ord", "chr",
+        "abs",
+        "round",
+        "min",
+        "max",
+        "sum",
+        "pow",
+        "divmod",
+        "hex",
+        "oct",
+        "bin",
+        "ord",
+        "chr",
         # iteration
-        "len", "range", "enumerate", "zip", "map", "filter", "reversed",
-        "sorted", "all", "any", "iter", "next",
+        "len",
+        "range",
+        "enumerate",
+        "zip",
+        "map",
+        "filter",
+        "reversed",
+        "sorted",
+        "all",
+        "any",
+        "iter",
+        "next",
         # inspection that cannot be turned into a capability
-        "isinstance", "issubclass", "callable", "repr", "format", "hash", "id",
-        "print", "type",
+        "isinstance",
+        "issubclass",
+        "callable",
+        "repr",
+        "format",
+        "hash",
+        "id",
+        "print",
+        "type",
         # exceptions a script may legitimately raise or catch
-        "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
-        "RuntimeError", "AttributeError", "ZeroDivisionError", "StopIteration",
-        "NotImplementedError", "ArithmeticError", "OverflowError",
-        "LookupError", "AssertionError", "FloatingPointError",
+        "Exception",
+        "ValueError",
+        "TypeError",
+        "KeyError",
+        "IndexError",
+        "RuntimeError",
+        "AttributeError",
+        "ZeroDivisionError",
+        "StopIteration",
+        "NotImplementedError",
+        "ArithmeticError",
+        "OverflowError",
+        "LookupError",
+        "AssertionError",
+        "FloatingPointError",
         # constants
-        "True", "False", "None", "NotImplemented", "Ellipsis",
+        "True",
+        "False",
+        "None",
+        "NotImplemented",
+        "Ellipsis",
     }
 )
 
@@ -233,18 +291,58 @@ _LITERAL_ONLY_ATTR_CALLS: Final[frozenset[str]] = frozenset(
 #: contains the real builtins.
 _FORBIDDEN_ATTRS: Final[frozenset[str]] = frozenset(
     {
-        "__class__", "__bases__", "__base__", "__subclasses__", "__mro__",
-        "mro", "__globals__", "__code__", "__closure__", "__func__",
-        "__self__", "__builtins__", "__dict__", "__getattribute__",
-        "__getattr__", "__setattr__", "__delattr__", "__reduce__",
-        "__reduce_ex__", "__init_subclass__", "__subclasshook__",
-        "__import__", "__loader__", "__spec__", "__package__", "__file__",
-        "__path__", "__module__", "__qualname__", "__wrapped__",
-        "func_globals", "func_code", "func_closure", "gi_frame", "cr_frame",
-        "f_globals", "f_locals", "f_builtins", "f_back", "tb_frame",
-        "__objclass__", "__weakref__", "__annotations__", "__defaults__",
-        "__kwdefaults__", "__new__", "__init__", "__call__",
-        "__getstate__", "__setstate__", "__sizeof__", "__format__",
+        "__class__",
+        "__bases__",
+        "__base__",
+        "__subclasses__",
+        "__mro__",
+        "mro",
+        "__globals__",
+        "__code__",
+        "__closure__",
+        "__func__",
+        "__self__",
+        "__builtins__",
+        "__dict__",
+        "__getattribute__",
+        "__getattr__",
+        "__setattr__",
+        "__delattr__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__init_subclass__",
+        "__subclasshook__",
+        "__import__",
+        "__loader__",
+        "__spec__",
+        "__package__",
+        "__file__",
+        "__path__",
+        "__module__",
+        "__qualname__",
+        "__wrapped__",
+        "func_globals",
+        "func_code",
+        "func_closure",
+        "gi_frame",
+        "cr_frame",
+        "f_globals",
+        "f_locals",
+        "f_builtins",
+        "f_back",
+        "tb_frame",
+        "__objclass__",
+        "__weakref__",
+        "__annotations__",
+        "__defaults__",
+        "__kwdefaults__",
+        "__new__",
+        "__init__",
+        "__call__",
+        "__getstate__",
+        "__setstate__",
+        "__sizeof__",
+        "__format__",
         "__doc__",
     }
 )
@@ -269,7 +367,10 @@ _FORBIDDEN_BPY_PATHS: Final[tuple[tuple[str, str], ...]] = (
     ("bpy.utils.refresh_script_paths", "reloads scripts from disk"),
     ("bpy.data.texts", "text datablocks are an execution path (Run Script)"),
     ("bpy.data.scripts", "script datablocks are an execution path"),
-    ("bpy.data.libraries", "library loading links external .blend files, which can carry code"),
+    (
+        "bpy.data.libraries",
+        "library loading links external .blend files, which can carry code",
+    ),
     ("bpy.props", "property registration persists definitions past this script"),
     ("bpy.types.Operator", "defining operators registers persistent code"),
     ("bpy.types.Panel", "defining panels registers persistent UI code"),
@@ -278,8 +379,14 @@ _FORBIDDEN_BPY_PATHS: Final[tuple[tuple[str, str], ...]] = (
     # Loading attacker-supplied datablocks from another .blend is a code
     # execution path: the file can carry drivers and handlers that Blender
     # evaluates on load.
-    ("bpy.ops.wm.append", "appends datablocks from an external .blend (code can ride along)"),
-    ("bpy.ops.wm.link", "links datablocks from an external .blend (code can ride along)"),
+    (
+        "bpy.ops.wm.append",
+        "appends datablocks from an external .blend (code can ride along)",
+    ),
+    (
+        "bpy.ops.wm.link",
+        "links datablocks from an external .blend (code can ride along)",
+    ),
     ("bpy.ops.wm.lib_relocate", "repoints a library at an arbitrary .blend"),
     ("bpy.ops.wm.lib_reload", "reloads a library from disk"),
     ("bpy.ops.wm.save_homefile", "overwrites the user's startup file"),
@@ -294,10 +401,10 @@ _FORBIDDEN_BPY_PATHS: Final[tuple[tuple[str, str], ...]] = (
 #: under them executes code. Prefix matching fails closed for operators that
 #: do not exist yet.
 _FORBIDDEN_OPS_PREFIXES: Final[tuple[str, ...]] = (
-    "bpy.ops.script",       # bpy.ops.script.* executes python
-    "bpy.ops.text",         # bpy.ops.text.* runs text datablocks
+    "bpy.ops.script",  # bpy.ops.script.* executes python
+    "bpy.ops.text",  # bpy.ops.text.* runs text datablocks
     "bpy.ops.preferences",  # preferences ops install and enable addons
-    "bpy.ops.console",      # the console executes arbitrary python
+    "bpy.ops.console",  # the console executes arbitrary python
 )
 
 #: Attribute names whose only purpose is to navigate from a module toward the
@@ -306,11 +413,19 @@ _FORBIDDEN_OPS_PREFIXES: Final[tuple[str, ...]] = (
 #: than the desktop set because most operator namespaces are now allowed and
 #: need no backstop (and names like `render` are ordinary data attributes:
 #: `bpy.data.scenes[0].render` must keep working).
-_MODULE_NAVIGATION: Final[frozenset[str]] = frozenset({
-    "ops", "utils", "app", "props", "types",
-    # Sub-namespaces of bpy.ops that own the blocked operators.
-    "wm", "script", "preferences",
-})
+_MODULE_NAVIGATION: Final[frozenset[str]] = frozenset(
+    {
+        "ops",
+        "utils",
+        "app",
+        "props",
+        "types",
+        # Sub-namespaces of bpy.ops that own the blocked operators.
+        "wm",
+        "script",
+        "preferences",
+    }
+)
 
 #: Attribute names that are blocked wherever they appear, regardless of what
 #: they hang off, because the receiver cannot always be resolved statically:
@@ -423,11 +538,35 @@ _ALLOWED_NODES: Final[tuple[type[ast.AST], ...]] = (
     ast.GeneratorExp,
     ast.comprehension,
     # operators are leaf nodes with no behavior of their own
-    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow,
-    ast.LShift, ast.RShift, ast.BitOr, ast.BitXor, ast.BitAnd, ast.MatMult,
-    ast.And, ast.Or, ast.Not, ast.UAdd, ast.USub, ast.Invert,
-    ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
-    ast.Is, ast.IsNot, ast.In, ast.NotIn,
+    ast.Add,
+    ast.Sub,
+    ast.Mult,
+    ast.Div,
+    ast.FloorDiv,
+    ast.Mod,
+    ast.Pow,
+    ast.LShift,
+    ast.RShift,
+    ast.BitOr,
+    ast.BitXor,
+    ast.BitAnd,
+    ast.MatMult,
+    ast.And,
+    ast.Or,
+    ast.Not,
+    ast.UAdd,
+    ast.USub,
+    ast.Invert,
+    ast.Eq,
+    ast.NotEq,
+    ast.Lt,
+    ast.LtE,
+    ast.Gt,
+    ast.GtE,
+    ast.Is,
+    ast.IsNot,
+    ast.In,
+    ast.NotIn,
 ) + ((ast.TryStar,) if hasattr(ast, "TryStar") else ())  # 3.11+
 
 _ALLOWED_NODE_SET: Final[frozenset[type[ast.AST]]] = frozenset(_ALLOWED_NODES)
@@ -626,7 +765,9 @@ class _Validator(ast.NodeVisitor):
                     f"importing {alias.name!r} from {module!r} is not allowed", node
                 )
             if alias.name.startswith("_"):
-                self._fail(f"importing private name {alias.name!r} is not allowed", node)
+                self._fail(
+                    f"importing private name {alias.name!r} is not allowed", node
+                )
             self._bind(alias.asname or alias.name, node)
 
     # -- names ------------------------------------------------------------
@@ -663,7 +804,10 @@ class _Validator(ast.NodeVisitor):
         if attr in _FORBIDDEN_BARE_ATTRS:
             self._fail(f"{attr!r}: {_FORBIDDEN_BARE_ATTRS[attr]}", node)
         # Writing to a stored-expression attribute is what arms a driver.
-        if isinstance(node.ctx, (ast.Store, ast.Del)) and attr in _FORBIDDEN_ASSIGN_ATTRS:
+        if (
+            isinstance(node.ctx, (ast.Store, ast.Del))
+            and attr in _FORBIDDEN_ASSIGN_ATTRS
+        ):
             self._fail(f"assigning {attr!r}: {_FORBIDDEN_ASSIGN_ATTRS[attr]}", node)
         path = _attr_chain(node)
         if path is None:
@@ -785,9 +929,13 @@ class _Validator(ast.NodeVisitor):
                 node,
             )
         if attr in _FORBIDDEN_BARE_ATTRS:
-            self._fail(f"{name}() targets {attr!r}: {_FORBIDDEN_BARE_ATTRS[attr]}", node)
+            self._fail(
+                f"{name}() targets {attr!r}: {_FORBIDDEN_BARE_ATTRS[attr]}", node
+            )
         if name in ("setattr", "delattr") and attr in _FORBIDDEN_ASSIGN_ATTRS:
-            self._fail(f"{name}() targets {attr!r}: {_FORBIDDEN_ASSIGN_ATTRS[attr]}", node)
+            self._fail(
+                f"{name}() targets {attr!r}: {_FORBIDDEN_ASSIGN_ATTRS[attr]}", node
+            )
 
     # -- functions --------------------------------------------------------
 
