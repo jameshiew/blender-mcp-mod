@@ -1,23 +1,15 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+FROM rust:1-bookworm AS builder
 
 WORKDIR /app
 
-ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
-
-# Install dependencies first so this layer is cached across source changes
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project --no-dev
-
-COPY README.md ./
+COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN uv sync --frozen --no-dev
+COPY resources ./resources
+COPY addon.py ./addon.py
+RUN cargo build --release --locked
 
-ENV PATH="/app/.venv/bin:$PATH"
-
-# Blender runs on the host, not in the container. host.docker.internal
-# resolves to the host on Docker Desktop (macOS/Windows); on Linux pass
-# --add-host=host.docker.internal:host-gateway or use --network=host.
+FROM debian:bookworm-slim
+COPY --from=builder /app/target/release/blender-mcp /usr/local/bin/blender-mcp
 ENV BLENDER_HOST=host.docker.internal \
     BLENDER_PORT=9876
 

@@ -2,9 +2,9 @@
 
 `execute_code` on the Blender socket is arbitrary code execution inside the
 user's Blender process — that is the product feature, so by default nothing is
-validated. Setting BLENDER_MCP_SAFE_MODE=1 turns on this validator in the MCP
-server, so a script authored by the model must clear it before a byte crosses
-the socket. The threat it addresses is prompt injection: third-party text
+validated. Setting BLENDER_MCP_SAFE_MODE=1 embeds this validator in the command
+sent by the Rust server. Blender validates the user script before executing it.
+The threat it addresses is prompt injection: third-party text
 (asset names and descriptions from Poly Haven, Sketchfab, Hyper3D) flows into
 the model's context, and injected instructions could steer the model into
 writing hostile code that a user approves without reading.

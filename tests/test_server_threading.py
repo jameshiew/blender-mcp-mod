@@ -19,20 +19,8 @@ import sys
 import threading
 import time
 import types
-from contextlib import contextmanager
 
 from conftest import ROOT_ADDON
-
-
-class _NullEditRecorder:
-    """Stands in for the addon's UserEditRecorder; captures nothing."""
-
-    def drain(self):
-        return []
-
-    @contextmanager
-    def agent_command(self):
-        yield
 
 
 def _load_server_class():
@@ -79,13 +67,10 @@ def _load_server_class():
         "queue": __import__("queue"),
         "traceback": __import__("traceback"),
         "os": __import__("os"),
+        "io": __import__("io"),
+        "redirect_stdout": __import__("contextlib").redirect_stdout,
         "get_blendermcp_addon_preferences": lambda context=None: None,
         "RODIN_FREE_TRIAL_KEY": "vibecoding",
-        # start()/stop() drive the edit-capture handlers, which live at module
-        # scope in addon.py and so are not carried in by lifting the class.
-        "_register_edit_capture_handlers": lambda: False,
-        "_unregister_edit_capture_handlers": lambda: None,
-        "get_edit_recorder": lambda: _NullEditRecorder(),
     }
     exec(compile(ast.Module(body=body, type_ignores=[]), "<addon>", "exec"), namespace)
     return namespace["BlenderMCPServer"], registered

@@ -1,0 +1,20 @@
+[package]
+name = "blender-mcp"
+version = "1.9.1"
+edition = "2024"
+description = "Blender integration through the Model Context Protocol"
+license = "MIT"
+repository = "https://github.com/ahujasid/blender-mcp"
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.23.1"
+clap = { version = "4.6.6", features = ["derive"] }
+dirs = "7.0.0"
+jsonschema = { version = "0.54.0", default-features = false }
+regex = "1.13.1"
+rmcp = { version = "3.2.0", default-features = false, features = ["server", "transport-io"] }
+serde_json = "1.0.151"
+tempfile = "3.27.0"
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "net", "sync", "time", "signal", "fs"] }
+url = "2.5.8"

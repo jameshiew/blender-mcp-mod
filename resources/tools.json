@@ -1,0 +1,532 @@
+[
+  {
+    "name": "get_addon_status",
+    "description": "Check the connected Blender add-on version and capabilities. Update with blender-mcp install-addon, then restart Blender.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_scene_info",
+    "description": "Get detailed information about the current Blender scene",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_object_info",
+    "description": "Get detailed information about a specific object in the Blender scene.\n\nParameters:\n- object_name: The name of the object to get information about",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "object_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "object_name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_viewport_screenshot",
+    "description": "Capture a screenshot of the current Blender 3D viewport.\n\nParameters:\n- max_size: Maximum size in pixels for the largest dimension (default: 1000)\n\nReturns the screenshot as an Image.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "max_size": {
+          "type": "integer",
+          "default": 1000,
+          "minimum": 1,
+          "maximum": 4096
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "execute_blender_code",
+    "description": "Execute arbitrary Python code in Blender. Make sure to do it step-by-step by breaking it into smaller chunks.\n\nParameters:\n- code: The Python code to execute",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_polyhaven_categories",
+    "description": "Get a list of categories for a specific asset type on Polyhaven.\n\nParameters:\n- asset_type: The type of asset to get categories for (hdris, textures, models, all)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "asset_type": {
+          "type": "string",
+          "default": "hdris"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "search_polyhaven_assets",
+    "description": "Search for assets on Polyhaven with optional filtering.\n\nParameters:\n- asset_type: Type of assets to search for (hdris, textures, models, all)\n- categories: Optional comma-separated list of categories to filter by\n\nReturns a list of matching assets with basic information.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "asset_type": {
+          "type": "string",
+          "default": "all"
+        },
+        "categories": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "download_polyhaven_asset",
+    "description": "Download and import a Polyhaven asset into Blender.\n\nParameters:\n- asset_id: The ID of the asset to download\n- asset_type: The type of asset (hdris, textures, models)\n- resolution: The resolution to download (e.g., 1k, 2k, 4k)\n- file_format: Optional file format (e.g., hdr, exr for HDRIs; jpg, png for textures; gltf, fbx for models)\n\nReturns the generation task identifiers or provider response. Poll the task before importing the result.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "asset_id": {
+          "type": "string"
+        },
+        "asset_type": {
+          "type": "string"
+        },
+        "resolution": {
+          "type": "string",
+          "default": "1k"
+        },
+        "file_format": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "asset_id",
+        "asset_type"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "set_texture",
+    "description": "Apply a previously downloaded Polyhaven texture to an object.\n\nParameters:\n- object_name: Name of the object to apply the texture to\n- texture_id: ID of the Polyhaven texture to apply (must be downloaded first)\n\nReturns the generation task identifiers or provider response. Poll the task before importing the result.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "object_name": {
+          "type": "string"
+        },
+        "texture_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "object_name",
+        "texture_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_polyhaven_status",
+    "description": "Check if PolyHaven integration is enabled in Blender.\nReturns a message indicating whether PolyHaven features are available.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_hyper3d_status",
+    "description": "Check if Hyper3D Rodin integration is enabled in Blender.\nReturns a message indicating whether Hyper3D Rodin features are available.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_sketchfab_status",
+    "description": "Check if Sketchfab integration is enabled in Blender.\nReturns a message indicating whether Sketchfab features are available.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "search_sketchfab_models",
+    "description": "Search for models on Sketchfab with optional filtering.\n\nParameters:\n- query: Text to search for\n- categories: Optional comma-separated list of categories\n- count: Maximum number of results to return (default 20)\n- downloadable: Whether to include only downloadable models (default True)\n\nReturns a formatted list of matching models.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "categories": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "count": {
+          "type": "integer",
+          "default": 20
+        },
+        "downloadable": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_sketchfab_model_preview",
+    "description": "Get a preview thumbnail of a Sketchfab model by its UID.\nUse this to visually confirm a model before downloading.\n\nParameters:\n- uid: The unique identifier of the Sketchfab model (obtained from search_sketchfab_models)\n\nReturns the model's thumbnail as an Image for visual confirmation.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "uid"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "download_sketchfab_model",
+    "description": "Download and import a Sketchfab model by its UID.\nThe model will be scaled so its largest dimension equals target_size.\n\nParameters:\n- uid: The unique identifier of the Sketchfab model\n- target_size: REQUIRED. The target size in Blender units/meters for the largest dimension.\n              You must specify the desired size for the model.\n              Examples:\n              - Chair: target_size=1.0 (1 meter tall)\n              - Table: target_size=0.75 (75cm tall)\n              - Car: target_size=4.5 (4.5 meters long)\n              - Person: target_size=1.7 (1.7 meters tall)\n              - Small object (cup, phone): target_size=0.1 to 0.3\n\nReturns JSON with import details including object names, dimensions, and bounding box.\nThe model must be downloadable and you must have proper access rights.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string"
+        },
+        "target_size": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "uid",
+        "target_size"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_polypizza_status",
+    "description": "Check if Poly Pizza integration is enabled in Blender.\nReturns a message indicating whether Poly Pizza features are available.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "search_polypizza_models",
+    "description": "Search for models on Poly Pizza with optional filtering.\n\nParameters:\n- query: Text to search for. May be left empty if at least one filter is given.\n- category: Optional category name, e.g. \"Animals\", \"Furniture & Decor\", \"Transport\",\n            \"Nature\", \"Buildings\", \"People & Characters\", \"Food & Drink\", \"Weapons\",\n            \"Clutter\", \"Objects\", \"Scenes & Levels\", \"Other\"\n- licence: Optional licence filter, either \"CC0\" (no credit required) or \"CC-BY\"\n           (credit required)\n- animated: When True, return only animated models (default False)\n- limit: Maximum number of results to return (default 20, the API caps it at 32)\n\nReturns model data including licence and triangle count. Credit CC-BY assets using the attribution returned when importing.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "default": ""
+        },
+        "category": {
+          "type": [
+            "string",
+            "integer",
+            "null"
+          ],
+          "default": null
+        },
+        "licence": {
+          "type": [
+            "string",
+            "integer",
+            "null"
+          ],
+          "default": null
+        },
+        "animated": {
+          "type": "boolean",
+          "default": false
+        },
+        "limit": {
+          "type": "integer",
+          "default": 20
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "download_polypizza_model",
+    "description": "Download and import a Poly Pizza model by its ID.\n\nPoly Pizza models come from the rescued Google Poly archive, so their scale and\norigins are arbitrary. Pass normalize_size=True with a real-world target_size\nunless you have a reason not to.\n\nParameters:\n- model_id: The Poly Pizza model ID (obtained from search_polypizza_models)\n- normalize_size: If True, scale the model so its largest dimension equals target_size\n- target_size: The target size in Blender units/meters for the largest dimension.\n              Examples:\n              - Chair: target_size=1.0 (1 meter tall)\n              - Table: target_size=0.75 (75cm tall)\n              - Car: target_size=4.5 (4.5 meters long)\n              - Person: target_size=1.7 (1.7 meters tall)\n              - Small object (cup, phone): target_size=0.1 to 0.3\n\nReturns JSON with import details including object names, dimensions, bounding\nbox, and the attribution string, which is also written onto each imported root\nobject as the custom properties polypizza_attribution, polypizza_id and\npolypizza_licence.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "model_id": {
+          "type": "string"
+        },
+        "normalize_size": {
+          "type": "boolean",
+          "default": false
+        },
+        "target_size": {
+          "type": "number",
+          "default": 1.0,
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "model_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "generate_hyper3d_model_via_text",
+    "description": "Generate 3D asset using Hyper3D by giving description of the desired asset, and import the asset into Blender.\nThe 3D asset has built-in materials.\nThe generated model has a normalized size, so re-scaling after generation can be useful.\n\nParameters:\n- text_prompt: A short description of the desired model in **English**.\n- bbox_condition: Optional. If given, it has to be a list of floats of length 3. Controls the ratio between [Length, Width, Height] of the model.\n\nReturns the generation task identifiers or provider response. Poll the task before importing the result.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text_prompt": {
+          "type": "string"
+        },
+        "bbox_condition": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "default": null,
+          "minItems": 3,
+          "maxItems": 3
+        }
+      },
+      "required": [
+        "text_prompt"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "generate_hyper3d_model_via_images",
+    "description": "Generate 3D asset using Hyper3D by giving images of the wanted asset, and import the generated asset into Blender.\nThe 3D asset has built-in materials.\nThe generated model has a normalized size, so re-scaling after generation can be useful.\n\nParameters:\n- input_image_paths: The **absolute** paths of input images. Even if only one image is provided, wrap it into a list. Required if Hyper3D Rodin in MAIN_SITE mode.\n- input_image_urls: The URLs of input images. Even if only one image is provided, wrap it into a list. Required if Hyper3D Rodin in FAL_AI mode.\n- bbox_condition: Optional. If given, it has to be a list of ints of length 3. Controls the ratio between [Length, Width, Height] of the model.\n\nOnly one of {input_image_paths, input_image_urls} should be given at a time, depending on the Hyper3D Rodin's current mode.\nReturns the generation task identifiers or provider response. Poll the task before importing the result.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "input_image_paths": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "default": null
+        },
+        "input_image_urls": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "default": null
+        },
+        "bbox_condition": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "default": null,
+          "minItems": 3,
+          "maxItems": 3
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "poll_rodin_job_status",
+    "description": "Check if the Hyper3D Rodin generation task is completed.\n\nFor Hyper3D Rodin mode MAIN_SITE:\n    Parameters:\n    - subscription_key: The subscription_key given in the generate model step.\n\n    Returns a list of status. The task is done if all status are \"Done\".\n    If \"Failed\" showed up, the generating process failed.\n    This is a polling API, so only proceed if the status are finally determined (\"Done\" or \"Canceled\").\n\nFor Hyper3D Rodin mode FAL_AI:\n    Parameters:\n    - request_id: The request_id given in the generate model step.\n\n    Returns the generation task status. The task is done if status is \"COMPLETED\".\n    The task is in progress if status is \"IN_PROGRESS\".\n    If status other than \"COMPLETED\", \"IN_PROGRESS\", \"IN_QUEUE\" showed up, the generating process might be failed.\n    This is a polling API, so only proceed if the status are finally determined (\"COMPLETED\" or some failed state).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "subscription_key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "request_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "import_generated_asset",
+    "description": "Import the asset generated by Hyper3D Rodin after the generation task is completed.\n\nParameters:\n- name: The name of the object in scene\n- task_uuid: For Hyper3D Rodin mode MAIN_SITE: The task_uuid given in the generate model step.\n- request_id: For Hyper3D Rodin mode FAL_AI: The request_id given in the generate model step.\n\nOnly give one of {task_uuid, request_id} based on the Hyper3D Rodin Mode!\nReturn if the asset has been imported successfully.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "task_uuid": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "request_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_hunyuan3d_status",
+    "description": "Check if Hunyuan3D integration is enabled in Blender.\nReturns a message indicating whether Hunyuan3D features are available.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "generate_hunyuan3d_model",
+    "description": "Generate 3D asset using Hunyuan3D by providing either text description, image reference, \nor both for the desired asset, and import the asset into Blender.\nThe 3D asset has built-in materials.\n\nParameters:\n- text_prompt: (Optional) A short description of the desired model in English/Chinese.\n- input_image_url: (Optional) The local or remote url of the input image. Accepts None if only using text prompt.\n\nReturns: \n- When successful, returns a JSON with job_id (format: \"job_xxx\") indicating the task is in progress\n- When the job completes, the status will change to \"DONE\" indicating the model has been imported\n- Returns error message if the operation fails",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text_prompt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "input_image_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "poll_hunyuan_job_status",
+    "description": "Check if the Hunyuan3D generation task is completed.\n\nFor Hunyuan3D:\n    Parameters:\n    - job_id: The job_id given in the generate model step.\n\n    Returns the generation task status. The task is done if status is \"DONE\".\n    The task is in progress if status is \"RUN\".\n    If status is \"DONE\", returns ResultFile3Ds with one or more downloadable model URLs.\n    Prefer a .glb URL when present (self-contained with materials); otherwise use a .zip/.obj asset URL.\n    This is a polling API, so only proceed if the status are finally determined (\"DONE\" or some failed state).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "import_generated_asset_hunyuan",
+    "description": "Import the asset generated by Hunyuan3D after the generation task is completed.\n\nParameters:\n- name: The name of the object in scene\n- zip_file_url: A model URL from ResultFile3Ds. Prefer a .glb URL when available; .zip/.obj URLs still work as a fallback.\n\nReturn if the asset has been imported successfully.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "zip_file_url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "zip_file_url"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

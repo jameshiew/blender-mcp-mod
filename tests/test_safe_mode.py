@@ -8,15 +8,14 @@ container-wrap / alias-walk bypasses of the path rules — must fail.
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "resources"))
 
-from blender_mcp.safe_mode import (  # noqa: E402
+from safe_mode import (  # noqa: E402
     SAFE_MODE_ENV,
     SandboxViolation,
     is_safe,
@@ -231,66 +230,3 @@ def test_is_safe_returns_reason():
     ok, reason = is_safe("import bpy\nprint(bpy.data.objects)")
     assert ok
     assert reason == ""
-
-
-# --- server wiring --------------------------------------------------------
-
-
-def test_execute_blender_code_short_circuits(monkeypatch):
-    """With safe mode on, a rejected script never reaches the socket."""
-    pytest.importorskip("mcp")
-    monkeypatch.setenv("DISABLE_TELEMETRY", "1")
-    monkeypatch.setenv(SAFE_MODE_ENV, "1")
-
-    from blender_mcp import server
-
-    def explode():
-        raise AssertionError("must not connect to Blender for a rejected script")
-
-    monkeypatch.setattr(server, "get_blender_connection", explode)
-
-    result = asyncio.run(server.execute_blender_code(ctx=None, code="import os"))
-    assert "Rejected by safe mode" in result
-    assert SAFE_MODE_ENV in result
-
-
-def test_execute_blender_code_passes_valid_code_through(monkeypatch):
-    """With safe mode on, a clean script proceeds to send_command."""
-    pytest.importorskip("mcp")
-    monkeypatch.setenv("DISABLE_TELEMETRY", "1")
-    monkeypatch.setenv(SAFE_MODE_ENV, "1")
-
-    from blender_mcp import server
-
-    sent = {}
-
-    class FakeConnection:
-        def send_command(self, command, params):
-            sent["command"] = command
-            sent["params"] = params
-            return {"result": "ok"}
-
-    monkeypatch.setattr(server, "get_blender_connection", lambda: FakeConnection())
-
-    code = "import bpy\nbpy.ops.mesh.primitive_cube_add()"
-    result = asyncio.run(server.execute_blender_code(ctx=None, code=code))
-    assert "Code executed successfully" in result
-    assert sent == {"command": "execute_code", "params": {"code": code}}
-
-
-def test_execute_blender_code_skips_validation_when_off(monkeypatch):
-    """Safe mode off: even a hostile-looking script goes straight through."""
-    pytest.importorskip("mcp")
-    monkeypatch.setenv("DISABLE_TELEMETRY", "1")
-    monkeypatch.delenv(SAFE_MODE_ENV, raising=False)
-
-    from blender_mcp import server
-
-    class FakeConnection:
-        def send_command(self, command, params):
-            return {"result": "ran"}
-
-    monkeypatch.setattr(server, "get_blender_connection", lambda: FakeConnection())
-
-    result = asyncio.run(server.execute_blender_code(ctx=None, code="import os"))
-    assert "Code executed successfully" in result

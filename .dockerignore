@@ -1,6 +1,3 @@
-# Everything the image doesn't need — only pyproject.toml, uv.lock,
-# README.md, and src/ are copied in, but keep the build context small
-# and local-only files out of it.
 .git
 .gitignore
 .venv
@@ -17,6 +14,9 @@ tests/
 docs/
 assets/
 scripts/
-supabase/
+target/
+pyproject.toml
+uv.lock
+README.md
 Dockerfile
 .dockerignore
