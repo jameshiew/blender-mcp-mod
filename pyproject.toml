@@ -1,6 +1,6 @@
 [project]
 name = "blender-mcp-addon-tests"
-version = "1.9.1"
+version = "1.9.1+mod"
 requires-python = ">=3.10"
 dependencies = []
 

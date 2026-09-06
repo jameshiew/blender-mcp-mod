@@ -1,10 +1,10 @@
 [package]
 name = "blender-mcp"
-version = "1.9.1"
+version = "1.9.1+mod"
 edition = "2024"
 description = "Blender integration through the Model Context Protocol"
 license = "MIT"
-repository = "https://github.com/ahujasid/blender-mcp"
+repository = "https://github.com/jameshiew/blender-mcp-mod"
 
 [dependencies]
 anyhow = "1.0.104"

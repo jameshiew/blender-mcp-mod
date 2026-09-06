@@ -12,7 +12,7 @@ resolution-markers = [
 
 [[package]]
 name = "blender-mcp-addon-tests"
-version = "1.9.1"
+version = "1.9.1+mod"
 source = { virtual = "." }
 
 [package.dev-dependencies]
