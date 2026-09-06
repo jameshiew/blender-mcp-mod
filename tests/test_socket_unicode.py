@@ -20,6 +20,7 @@ chunks - deterministic, no network, no flakiness.
 from __future__ import annotations
 
 import json
+import queue
 
 import pytest
 from test_server_threading import BlenderMCPServer
@@ -33,6 +34,9 @@ class _ScriptedSocket:
         self.sent = []
 
     def settimeout(self, timeout):
+        pass
+
+    def do_handshake(self):
         pass
 
     def recv(self, bufsize):
@@ -50,6 +54,13 @@ class _ScriptedSocket:
 def _make_server():
     server = BlenderMCPServer(port=0)
     server.execute_command = lambda command: {"status": "success", "result": {}}
+
+    class RespondingQueue(queue.Queue):
+        def put(self, item):
+            super().put(item)
+            item[1].put(b'{"status":"success","result":{}}')
+
+    server.command_queue = RespondingQueue()
     return server
 
 

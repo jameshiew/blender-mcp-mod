@@ -17,32 +17,8 @@ from test_server_threading import BlenderMCPServer
 logger = logging.getLogger(__name__)
 
 
-@pytest.fixture(scope="session")
-def binary():
-    build = subprocess.run(
-        [
-            os.environ.get("CARGO", "cargo"),
-            "build",
-            "--locked",
-            "--message-format=json",
-        ],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    artifacts = [json.loads(line) for line in build.stdout.splitlines()]
-    return next(
-        Path(artifact["executable"])
-        for artifact in artifacts
-        if artifact.get("reason") == "compiler-artifact"
-        and artifact["target"]["name"] == "blender-mcp"
-        and artifact.get("executable")
-    )
-
-
 class Client:
-    def __init__(self, binary, directory, safe_mode=False):
+    def __init__(self, binary, directory, safe_mode=False, server=None):
         self.commands = []
         self.errors = queue.Queue()
         self.responses = queue.Queue()
@@ -53,10 +29,11 @@ class Client:
         self.listener.settimeout(0.1)
         self.scene = types.SimpleNamespace(name="Scene")
         self.executor = BlenderMCPServer()
+        self.tls_context = self.executor._load_tls_context()
         env = dict(
             os.environ,
             BLENDER_HOST="127.0.0.1",
-            BLENDER_PORT=str(self.listener.getsockname()[1]),
+            BLENDER_PORT=str(server.port if server else self.listener.getsockname()[1]),
             BLENDER_MCP_SAFE_MODE="1" if safe_mode else "0",
             BLENDER_USER_ADDONS=str(directory),
         )
@@ -99,7 +76,10 @@ class Client:
                     connection, _ = self.listener.accept()
                 except TimeoutError:
                     continue
-                with connection:
+                connection.settimeout(5)
+                with self.tls_context.wrap_socket(
+                    connection, server_side=True
+                ) as connection:
                     connection.settimeout(0.1)
                     buffer = b""
                     while not self.stopped.is_set():
@@ -135,7 +115,7 @@ class Client:
                 return {"status": "error", "message": str(error)}
         elif name == "get_addon_info":
             result = {
-                "protocol_version": 6,
+                "protocol_version": 7,
                 "addon_version": [1, 6],
                 "capabilities": ["execute_code"],
                 "blender_version": "test",

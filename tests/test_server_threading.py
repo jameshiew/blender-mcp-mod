@@ -20,7 +20,9 @@ import threading
 import time
 import types
 
-from conftest import ROOT_ADDON
+from conftest import ROOT_ADDON, client_tls_context
+from pathlib import Path
+import os
 
 
 def _load_server_class():
@@ -56,11 +58,23 @@ def _load_server_class():
 
     bpy = types.ModuleType("bpy")
     bpy.app = types.SimpleNamespace(background=False, timers=_Timers())
-    bpy.context = types.SimpleNamespace(scene=types.SimpleNamespace())
+    bpy.context = types.SimpleNamespace(
+        scene=types.SimpleNamespace(
+            blendermcp_use_polyhaven=False,
+            blendermcp_use_hyper3d=False,
+            blendermcp_use_sketchfab=False,
+            blendermcp_use_polypizza=False,
+            blendermcp_use_hunyuan3d=False,
+        )
+    )
 
     namespace = {
         "bpy": bpy,
         "socket": socket,
+        "ssl": __import__("ssl"),
+        "stat": __import__("stat"),
+        "Path": Path,
+        "tempfile": __import__("tempfile"),
         "threading": threading,
         "json": json,
         "time": time,
@@ -77,6 +91,14 @@ def _load_server_class():
 
 
 BlenderMCPServer, _registered = _load_server_class()
+
+
+def _connect(port):
+    context = client_tls_context(Path(os.environ["BLENDER_MCP_CONFIG_DIR"]))
+    return context.wrap_socket(
+        socket.create_connection(("127.0.0.1", port), timeout=5),
+        server_hostname="blender-mcp.local",
+    )
 
 
 def _free_port():
@@ -112,7 +134,7 @@ def test_client_thread_never_registers_a_timer():
     server = _make_server()
     server.start()
     try:
-        with socket.create_connection(("localhost", server.port), timeout=5) as client:
+        with _connect(server.port) as client:
             client.sendall(json.dumps({"type": "ping"}).encode())
 
             pump = threading.Thread(target=_pump, args=(server,), daemon=True)
@@ -132,7 +154,7 @@ def test_command_is_queued_not_executed_on_client_thread():
     server = _make_server()
     server.start()
     try:
-        with socket.create_connection(("localhost", server.port), timeout=5) as client:
+        with _connect(server.port) as client:
             client.sendall(json.dumps({"type": "ping"}).encode())
 
             # No pump running, so nothing should execute yet.
@@ -160,7 +182,7 @@ def test_stop_releases_client_threads():
     server = _make_server()
     server.start()
 
-    client = socket.create_connection(("localhost", server.port), timeout=5)
+    client = _connect(server.port)
     try:
         deadline = time.time() + 2.0
         while time.time() < deadline:
@@ -204,7 +226,7 @@ def test_restart_rebinds_port_cleanly():
     first = BlenderMCPServer(port=port)
     first.execute_command = lambda command: {"status": "success", "result": {}}
     first.start()
-    with socket.create_connection(("localhost", port), timeout=5):
+    with _connect(port):
         pass
     first.stop()
 
@@ -215,7 +237,7 @@ def test_restart_rebinds_port_cleanly():
     }
     second.start()
     try:
-        with socket.create_connection(("localhost", port), timeout=5) as client:
+        with _connect(port) as client:
             client.sendall(json.dumps({"type": "ping"}).encode())
             pump = threading.Thread(target=_pump, args=(second,), daemon=True)
             pump.start()

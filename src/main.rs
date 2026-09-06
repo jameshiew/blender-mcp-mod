@@ -1,7 +1,7 @@
 use std::{io::IsTerminal, path::PathBuf};
 
 use anyhow::{Context, Result};
-use blender_mcp::{addon, server::BlenderServer, tools};
+use blender_mcp::{addon, security, server::BlenderServer, tools};
 use clap::{Parser, Subcommand};
 use rmcp::ServiceExt;
 
@@ -9,7 +9,7 @@ use rmcp::ServiceExt;
 #[command(
     version,
     about = "MCP for Blender: stdio server and add-on installer",
-    after_help = "Without a subcommand, serve MCP on stdin/stdout.\nBLENDER_HOST=localhost BLENDER_PORT=9876\nBLENDER_MCP_SAFE_MODE=1 enables the Python AST guard inside Blender."
+    after_help = "Without a subcommand, serve MCP on stdin/stdout.\nBLENDER_HOST=localhost BLENDER_PORT=9876\nConnections require mutual TLS. Run install-addon or setup-connection first.\nBLENDER_MCP_CONFIG_DIR overrides the credential directory (default: ~/.blender-mcp).\nBLENDER_MCP_SAFE_MODE=1 enables the Python AST guard inside Blender."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -25,16 +25,26 @@ enum Command {
     },
     #[command(about = "List discovered Blender add-on directories and installations")]
     AddonPaths,
+    #[command(about = "Create local TLS credentials without replacing an existing pairing")]
+    SetupConnection,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
         Some(Command::InstallAddon { addons_dir }) => {
+            let directory = security::directory()?;
+            security::setup(&directory)?;
             for path in addon::install(addons_dir)? {
                 println!("Installed {}", path.display());
             }
             println!("Restart Blender or disable and enable the add-on, then Start MCP Server.");
+        }
+        Some(Command::SetupConnection) => {
+            let directory = security::directory()?;
+            security::setup(&directory)?;
+            println!("Connection credentials ready in {}", directory.display());
+            println!("Restart Blender or start the MCP add-on to use them.");
         }
         Some(Command::AddonPaths) => {
             let directories = addon::discover()?;

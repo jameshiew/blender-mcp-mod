@@ -6,6 +6,9 @@ import mathutils
 import json
 import threading
 import socket
+import ssl
+import stat
+from pathlib import Path
 import queue
 import time
 import requests
@@ -32,7 +35,7 @@ bl_info = {
     "category": "Interface",
 }
 
-ADDON_PROTOCOL_VERSION = 6
+ADDON_PROTOCOL_VERSION = 7
 
 RODIN_FREE_TRIAL_KEY = "vibecoding"
 
@@ -177,12 +180,17 @@ def get_blendermcp_addon_preferences(context=None):
 
 
 class BlenderMCPServer:
-    def __init__(self, host="localhost", port=9876):
+    def __init__(self, host="127.0.0.1", port=9876, config_dir=None):
         self.host = host
         self.port = port
         self.running = False
         self.socket = None
         self.server_thread = None
+        self.config_dir = config_dir
+        self._tls_context = None
+        self.last_error = ""
+        self.handshake_timeout = 5.0
+        self.max_clients = 16
         # Commands are pushed here by client threads and drained by a single
         # timer running on Blender's main thread. bpy.app.timers is not
         # thread-safe, so registering a timer per command (the previous
@@ -192,6 +200,49 @@ class BlenderMCPServer:
         # Live client sockets, so stop() can unblock threads parked in recv().
         self._clients = set()
         self._clients_lock = threading.Lock()
+
+    def _load_tls_context(self):
+        directory = self.config_dir
+        if directory is None:
+            directory = os.environ.get(
+                "BLENDER_MCP_CONFIG_DIR", str(Path.home() / ".blender-mcp")
+            )
+        directory = Path(directory)
+        if not directory.is_absolute():
+            raise ValueError("BLENDER_MCP_CONFIG_DIR must be an absolute path")
+        path = directory / "credentials.json"
+        for item, is_directory in ((directory, True), (path, False)):
+            metadata = item.lstat()
+            valid_type = (
+                stat.S_ISDIR(metadata.st_mode)
+                if is_directory
+                else stat.S_ISREG(metadata.st_mode)
+            )
+            if not valid_type:
+                raise ValueError(
+                    f"{item} must be a regular {'directory' if is_directory else 'file'} (no symlinks)"
+                )
+            if os.name == "posix" and (
+                metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077
+            ):
+                raise ValueError(
+                    f"{item} must be owned by the current user with no group/other permissions"
+                )
+        with path.open(encoding="utf-8") as file:
+            credentials = json.load(file)
+        if credentials.get("version") != 1:
+            raise ValueError("Unsupported Blender connection credentials")
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_3
+        context.verify_mode = ssl.CERT_REQUIRED
+        context.load_verify_locations(cadata=credentials["ca"])
+        context.num_tickets = 0
+        with tempfile.TemporaryDirectory(dir=directory) as temporary:
+            chain = Path(temporary) / "server.pem"
+            with chain.open("x", encoding="ascii") as file:
+                file.write(credentials["server_cert"] + credentials["server_key"])
+            context.load_cert_chain(chain)
+        return context
 
     def _get_config_value(self, scene_attr, pref_attr=None, env_var=None):
         """Read config in order: addon preferences -> scene -> env var."""
@@ -274,12 +325,15 @@ class BlenderMCPServer:
             return
 
         self.running = True
+        self.last_error = ""
 
         try:
+            self._tls_context = self._load_tls_context()
             # Create socket
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.socket.bind((self.host, self.port))
+            self.port = self.socket.getsockname()[1]
             # Backlog of 1 meant a reconnecting client could complete the TCP
             # handshake and then never be accept()ed - a connection that looks
             # established but is never serviced.
@@ -297,6 +351,7 @@ class BlenderMCPServer:
 
             print(f"BlenderMCP server started on {self.host}:{self.port}")
         except Exception as e:
+            self.last_error = f"Secure connection unavailable: {e}. Run blender-mcp setup-connection, then start the server again."
             print(f"Failed to start server: {str(e)}")
             self.stop()
 
@@ -362,7 +417,18 @@ class BlenderMCPServer:
                 # Accept new connection
                 try:
                     client, address = self.socket.accept()
-                    print(f"Connected to client: {address}")
+                    with self._clients_lock:
+                        if not self.running or len(self._clients) >= self.max_clients:
+                            client.close()
+                            continue
+                        try:
+                            client = self._tls_context.wrap_socket(
+                                client, server_side=True, do_handshake_on_connect=False
+                            )
+                        except Exception:
+                            client.close()
+                            raise
+                        self._clients.add(client)
 
                     # Handle client in a separate thread
                     client_thread = threading.Thread(
@@ -395,7 +461,7 @@ class BlenderMCPServer:
 
         while True:
             try:
-                command, client = self.command_queue.get_nowait()
+                command, response_queue = self.command_queue.get_nowait()
             except queue.Empty:
                 break
 
@@ -407,24 +473,19 @@ class BlenderMCPServer:
                 traceback.print_exc()
                 response_json = json.dumps({"status": "error", "message": str(e)})
 
-            try:
-                client.sendall(response_json.encode("utf-8"))
-            except Exception:
-                print("Failed to send response - client disconnected")
+            response_queue.put(response_json.encode("utf-8"))
 
         return 0.05
 
     def _handle_client(self, client):
         """Handle connected client"""
         print("Client handler started")
-        # A finite timeout keeps this loop responsive to self.running instead
-        # of parking in recv() forever.
-        client.settimeout(1.0)
-        with self._clients_lock:
-            self._clients.add(client)
         buffer = b""
 
         try:
+            client.settimeout(self.handshake_timeout)
+            client.do_handshake()
+            client.settimeout(1.0)
             while self.running:
                 # Receive data
                 try:
@@ -434,16 +495,30 @@ class BlenderMCPServer:
                         break
 
                     buffer += data
+                    if len(buffer) > 32 * 1024 * 1024:
+                        raise ValueError("Blender command exceeds the 32 MiB limit")
                     try:
                         # Try to parse command
                         command = json.loads(buffer.decode("utf-8"))
                         buffer = b""
+                        if not isinstance(command, dict):
+                            raise ValueError("Blender command must be a JSON object")
 
                         # Hand off to the main thread. Never call
                         # bpy.app.timers.register() from here - it is not
                         # thread-safe and the callback can be silently lost.
                         print(f"Queued command: {command.get('type')}")
-                        self.command_queue.put((command, client))
+                        response_queue = queue.Queue(maxsize=1)
+                        self.command_queue.put((command, response_queue))
+                        while self.running:
+                            try:
+                                response = response_queue.get(timeout=0.1)
+                                break
+                            except queue.Empty:
+                                continue
+                        else:
+                            break
+                        client.sendall(response)
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         # Incomplete data, wait for more. A multi-byte UTF-8
                         # character can land split across a recv() chunk
@@ -3435,6 +3510,9 @@ class BLENDERMCP_PT_Panel(bpy.types.Panel):
             col.operator("blendermcp.stop_server", text="Disconnect", icon="X")
         else:
             col.label(text="Not connected", icon="RADIOBUT_OFF")
+            server = getattr(bpy.types, "blendermcp_server", None)
+            if server and server.last_error:
+                col.label(text="Run blender-mcp setup-connection", icon="ERROR")
             col.prop(scene, "blendermcp_port")
             col.operator(
                 "blendermcp.start_server", text="Connect to MCP server", icon="PLAY"
@@ -3574,6 +3652,12 @@ class BLENDERMCP_OT_StartServer(bpy.types.Operator):
         # Start the server
         bpy.types.blendermcp_server.start()
         scene.blendermcp_server_running = bpy.types.blendermcp_server.running
+        if not scene.blendermcp_server_running:
+            self.report(
+                {"ERROR"},
+                bpy.types.blendermcp_server.last_error or "MCP server could not start",
+            )
+            return {"CANCELLED"}
 
         return {"FINISHED"}
 

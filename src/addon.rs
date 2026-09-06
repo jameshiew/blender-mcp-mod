@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use regex::Regex;
 
-pub const PROTOCOL_VERSION: u64 = 6;
+pub const PROTOCOL_VERSION: u64 = 7;
 pub const SOURCE: &str = include_str!("../addon.py");
 const FILENAME: &str = "blendermcp.py";
 
