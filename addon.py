@@ -28,14 +28,14 @@ from contextlib import redirect_stdout, suppress
 bl_info = {
     "name": "MCP for Blender",
     "author": "BlenderMCP",
-    "version": (1, 9, 1),
+    "version": (2, 0, 0),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > MCP for Blender",
     "description": "Connect Blender to Claude via MCP",
     "category": "Interface",
 }
 
-ADDON_VERSION = "1.9.1+mod"
+ADDON_VERSION = "2.0.0+mod"
 ADDON_PROTOCOL_VERSION = 7
 
 RODIN_FREE_TRIAL_KEY = "vibecoding"

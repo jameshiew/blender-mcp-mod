@@ -194,9 +194,14 @@ def test_unsafe_credential_storage_is_rejected(binary, tmp_path, target):
     assert result.returncode != 0
 
 
+@pytest.mark.parametrize("legacy_setting", [None, "1"])
 def test_rust_client_executes_unsandboxed_python_through_real_handler(
-    server, binary, tmp_path
+    server, binary, tmp_path, monkeypatch, legacy_setting
 ):
+    if legacy_setting is None:
+        monkeypatch.delenv("BLENDER_MCP_SAFE_MODE", raising=False)
+    else:
+        monkeypatch.setenv("BLENDER_MCP_SAFE_MODE", legacy_setting)
     client = Client(binary, tmp_path, server=server)
     marker = tmp_path / "python-created.txt"
     results = []

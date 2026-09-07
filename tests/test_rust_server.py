@@ -5,9 +5,7 @@ import os
 import queue
 import socket
 import subprocess
-import sys
 import threading
-import types
 from pathlib import Path
 
 import pytest
@@ -18,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class Client:
-    def __init__(self, binary, directory, safe_mode=False, server=None):
+    def __init__(self, binary, directory, server=None):
         self.commands = []
         self.errors = queue.Queue()
         self.responses = queue.Queue()
@@ -27,14 +25,12 @@ class Client:
         self.listener.bind(("127.0.0.1", 0))
         self.listener.listen()
         self.listener.settimeout(0.1)
-        self.scene = types.SimpleNamespace(name="Scene")
         self.executor = BlenderMCPServer()
         self.tls_context = self.executor._load_tls_context()
         env = dict(
             os.environ,
             BLENDER_HOST="127.0.0.1",
             BLENDER_PORT=str(server.port if server else self.listener.getsockname()[1]),
-            BLENDER_MCP_SAFE_MODE="1" if safe_mode else "0",
             BLENDER_USER_ADDONS=str(directory),
         )
         self.process = subprocess.Popen(
@@ -116,8 +112,8 @@ class Client:
         elif name == "get_addon_info":
             result = {
                 "protocol_version": 7,
-                "addon_version": [1, 9, 1],
-                "addon_build_version": "1.9.1+mod",
+                "addon_version": [2, 0, 0],
+                "addon_build_version": "2.0.0+mod",
                 "capabilities": ["execute_code"],
                 "blender_version": "test",
             }
@@ -366,31 +362,6 @@ def test_errors_are_visible_and_server_remains_usable(client):
     assert client.commands[-1]["params"] == {}
 
 
-def test_rust_safe_mode_validates_before_running_user_code(
-    binary, tmp_path, monkeypatch
-):
-    client = Client(binary, tmp_path, safe_mode=True)
-    bpy = types.ModuleType("bpy")
-    bpy.context = types.SimpleNamespace(scene=client.scene)
-    monkeypatch.setitem(sys.modules, "bpy", bpy)
-    try:
-        result = client.call(
-            "execute_blender_code",
-            {"code": "import bpy\nbpy.context.scene.name = 'Safe'\nprint('done')"},
-        )
-        assert not result.get("isError"), result
-        assert client.scene.name == "Safe"
-        assert json.loads(result["content"][0]["text"])["result"] == "done\n"
-        result = client.call(
-            "execute_blender_code",
-            {"code": "import bpy\nbpy.context.scene.name = 'Unsafe'\nimport os"},
-        )
-        assert result["isError"] is True
-        assert client.scene.name == "Safe"
-    finally:
-        client.close()
-
-
 def test_local_rodin_images_are_encoded(client, tmp_path):
     path = tmp_path / "input.png"
     path.write_bytes(b"local-image")
@@ -414,14 +385,14 @@ def test_installer_binary_contains_addon(binary, tmp_path):
     ).read_bytes()
 
 
-@pytest.mark.parametrize("version", [None, "1.6.0", "1.9.1", "1.9.1+mod"])
+@pytest.mark.parametrize("version", [None, "1.6.0", "1.9.1+mod", "2.0.0", "2.0.0+mod"])
 def test_addon_status_checks_build_version(client, version):
-    result = {"protocol_version": 7, "addon_version": [1, 9, 1]}
+    result = {"protocol_version": 7, "addon_version": [2, 0, 0]}
     if version is not None:
         result["addon_build_version"] = version
     client.respond = lambda command: {"status": "success", "result": result}
 
     status = json.loads(client.call("get_addon_status", {})["content"][0]["text"])
 
-    assert status["up_to_date"] is (version == "1.9.1+mod")
-    assert status["expected_addon_version"] == "1.9.1+mod"
+    assert status["up_to_date"] is (version == "2.0.0+mod")
+    assert status["expected_addon_version"] == "2.0.0+mod"

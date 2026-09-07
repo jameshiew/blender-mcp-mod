@@ -1,7 +1,7 @@
 use std::{io::IsTerminal, path::PathBuf};
 
 use anyhow::{Context, Result};
-use blender_mcp::{addon, security, server::BlenderServer, tools};
+use blender_mcp::{addon, security, server::BlenderServer};
 use clap::{Parser, Subcommand};
 use rmcp::ServiceExt;
 
@@ -9,7 +9,7 @@ use rmcp::ServiceExt;
 #[command(
     version,
     about = "MCP for Blender: stdio server and add-on installer",
-    after_help = "Without a subcommand, serve MCP on stdin/stdout.\nBLENDER_HOST=localhost BLENDER_PORT=9876\nConnections require mutual TLS. Run install-addon or setup-connection first.\nBLENDER_MCP_CONFIG_DIR overrides the credential directory (default: ~/.blender-mcp).\nBLENDER_MCP_SAFE_MODE=1 enables the Python AST guard inside Blender."
+    after_help = "Without a subcommand, serve MCP on stdin/stdout.\nBLENDER_HOST=localhost BLENDER_PORT=9876\nConnections require mutual TLS. Run install-addon or setup-connection first.\nBLENDER_MCP_CONFIG_DIR overrides the credential directory (default: ~/.blender-mcp)."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
             if let Err(error) = addon::check_installed() {
                 eprintln!("Could not check local add-on: {error}");
             }
-            let service = BlenderServer::new(host, port, tools::safe_mode_enabled())?
+            let service = BlenderServer::new(host, port)?
                 .serve(rmcp::transport::stdio())
                 .await?;
             tokio::select! {

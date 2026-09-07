@@ -457,9 +457,9 @@ mod tests {
     #[test]
     fn refuses_newer_versions_before_replacing_any_installation() {
         for newer in [
-            "bl_info = {'name': 'Blender MCP', 'version': (2, 0, 0)}",
-            "bl_info = {'name': 'Blender MCP', 'version': (1, 6)}\nADDON_VERSION = '2.0.0+mod'",
-            "bl_info = {'name': 'Blender MCP', 'version': (1, 9, 1)}\nADDON_PROTOCOL_VERSION = 8",
+            "bl_info = {'name': 'Blender MCP', 'version': (3, 0, 0)}",
+            "bl_info = {'name': 'Blender MCP', 'version': (1, 6)}\nADDON_VERSION = '3.0.0+mod'",
+            "bl_info = {'name': 'Blender MCP', 'version': (2, 0, 0)}\nADDON_PROTOCOL_VERSION = 8",
         ] {
             let directory = tempfile::tempdir().unwrap();
             let older = directory.path().join("a.py");
@@ -485,12 +485,15 @@ mod tests {
         .unwrap();
         assert_eq!(installed_version(&target).unwrap(), "1.6");
         install(Some(directory.path().into())).unwrap();
-        assert_eq!(installed_version(&target).unwrap(), "1.9.1+mod");
+        assert_eq!(
+            installed_version(&target).unwrap(),
+            env!("CARGO_PKG_VERSION")
+        );
     }
 
     #[test]
     fn compares_release_precedence_without_ordering_build_labels() {
-        for version in ["1.9.1+upstream", "1.9.1-alpha+mod", "1.9.0+mod"] {
+        for version in ["2.0.0+upstream", "2.0.0-alpha+mod", "1.9.1+mod"] {
             let directory = tempfile::tempdir().unwrap();
             let target = directory.path().join(FILENAME);
             fs::write(
@@ -499,7 +502,10 @@ mod tests {
             )
             .unwrap();
             install(Some(directory.path().into())).unwrap();
-            assert_eq!(installed_version(&target).unwrap(), "1.9.1+mod");
+            assert_eq!(
+                installed_version(&target).unwrap(),
+                env!("CARGO_PKG_VERSION")
+            );
         }
     }
 }

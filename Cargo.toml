@@ -1,6 +1,6 @@
 [package]
 name = "blender-mcp"
-version = "1.9.1+mod"
+version = "2.0.0+mod"
 edition = "2024"
 description = "Blender integration through the Model Context Protocol"
 license = "MIT"

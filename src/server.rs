@@ -11,15 +11,13 @@ use crate::{
 pub struct BlenderServer {
     connection: Arc<BlenderConnection>,
     tools: Vec<ToolDefinition>,
-    safe_mode: bool,
 }
 
 impl BlenderServer {
-    pub fn new(host: String, port: u16, safe_mode: bool) -> Result<Self> {
+    pub fn new(host: String, port: u16) -> Result<Self> {
         Ok(Self {
             connection: Arc::new(BlenderConnection::new(host, port)),
             tools: tools::definitions()?,
-            safe_mode,
         })
     }
 }
@@ -68,7 +66,7 @@ impl ServerHandler for BlenderServer {
                 )
             })?;
         let result = match definition.arguments(request.arguments.unwrap_or_default()) {
-            Ok(args) => tools::execute(&self.connection, &request.name, args, self.safe_mode).await,
+            Ok(args) => tools::execute(&self.connection, &request.name, args).await,
             Err(error) => Err(error),
         };
         Ok(match result {

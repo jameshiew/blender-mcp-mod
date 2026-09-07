@@ -187,7 +187,7 @@ checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
 name = "blender-mcp"
-version = "1.9.1+mod"
+version = "2.0.0+mod"
 dependencies = [
  "anyhow",
  "base64",

@@ -51,29 +51,7 @@ impl ToolDefinition {
     }
 }
 
-pub fn safe_mode_enabled() -> bool {
-    std::env::var("BLENDER_MCP_SAFE_MODE").is_ok_and(|v| {
-        matches!(
-            v.trim().to_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
-}
-
-pub fn guarded_code(code: &str) -> String {
-    let validator = serde_json::to_string(include_str!("../resources/safe_mode.py"))
-        .expect("string serialization");
-    let code = serde_json::to_string(code).expect("string serialization");
-    format!(
-        "_guard = {{}}\nexec({validator}, _guard)\n_guard['validate_code']({code})\nexec({code}, {{'bpy': bpy}})\n"
-    )
-}
-
-pub async fn prepare(
-    name: &str,
-    mut args: Map<String, Value>,
-    safe_mode: bool,
-) -> Result<(String, Value)> {
+pub async fn prepare(name: &str, mut args: Map<String, Value>) -> Result<(String, Value)> {
     let command = match name {
         "get_addon_status" => "get_addon_info",
         "get_object_info" => {
@@ -81,13 +59,7 @@ pub async fn prepare(
             args.insert("name".into(), value);
             name
         }
-        "execute_blender_code" => {
-            if safe_mode {
-                let code = args["code"].as_str().context("Missing code")?;
-                args.insert("code".into(), json!(guarded_code(code)));
-            }
-            "execute_code"
-        }
+        "execute_blender_code" => "execute_code",
         "download_sketchfab_model" => {
             args.insert("normalize_size".into(), json!(true));
             name
@@ -299,9 +271,8 @@ pub async fn execute(
     connection: &Arc<BlenderConnection>,
     name: &str,
     args: Map<String, Value>,
-    safe_mode: bool,
 ) -> Result<CallToolResult> {
-    let (command, params) = prepare(name, args, safe_mode).await?;
+    let (command, params) = prepare(name, args).await?;
     let mut result = connection.send(&command, params).await?;
     if matches!(
         command.as_str(),
@@ -390,7 +361,7 @@ mod tests {
         assert!(
             args(
                 "execute_blender_code",
-                json!({"code":"pass", "safe_mode":false})
+                json!({"code":"pass", "unexpected":false})
             )
             .is_err()
         );
@@ -408,7 +379,6 @@ mod tests {
             prepare(
                 "get_object_info",
                 args("get_object_info", json!({"object_name":"Cube"})).unwrap(),
-                false
             )
             .await
             .unwrap(),
@@ -421,7 +391,6 @@ mod tests {
                 json!({"uid":"model", "target_size":1.7}),
             )
             .unwrap(),
-            false,
         )
         .await
         .unwrap();
@@ -436,7 +405,6 @@ mod tests {
                 json!({"category":"Animals", "licence":"CC0"}),
             )
             .unwrap(),
-            false,
         )
         .await
         .unwrap();
@@ -446,7 +414,6 @@ mod tests {
             prepare(
                 "search_polypizza_models",
                 args("search_polypizza_models", json!({})).unwrap(),
-                false
             )
             .await
             .is_err()
@@ -501,7 +468,6 @@ mod tests {
                 json!({"input_image_urls":["https://example.com/image.png"]}),
             )
             .unwrap(),
-            false,
         )
         .await
         .unwrap();
@@ -515,11 +481,7 @@ mod tests {
             json!({"input_image_urls":["file:///tmp/a"]}),
             json!({"input_image_paths":[],"input_image_urls":[]}),
         ] {
-            assert!(
-                prepare(name, args(name, value).unwrap(), false)
-                    .await
-                    .is_err()
-            );
+            assert!(prepare(name, args(name, value).unwrap()).await.is_err());
         }
     }
 }
