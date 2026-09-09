@@ -55,6 +55,7 @@ def _install_bpy_stubs(monkeypatch, scene):
     app.version = (4, 2, 0)
     app.version_string = "4.2.0"
     app.background = False
+    app.online_access = True
     app.handlers = handlers
     app.timers = types.SimpleNamespace(
         is_registered=lambda *_a, **_k: False,

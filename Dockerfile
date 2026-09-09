@@ -3,9 +3,10 @@ FROM rust:1-bookworm AS builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
+COPY build.rs uv.lock LICENSE ./
 COPY src ./src
 COPY resources ./resources
-COPY addon.py ./addon.py
+COPY extension ./extension
 RUN cargo build --release --locked
 
 FROM debian:bookworm-slim

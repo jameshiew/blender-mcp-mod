@@ -1,6 +1,6 @@
 """Tests for the addon's socket server threading model (no Blender required).
 
-addon.py cannot be imported without bpy, so BlenderMCPServer is lifted out by
+The extension cannot be imported without bpy, so BlenderMCPServer is lifted out by
 AST and executed against stubs.
 
 The bug these cover: commands used to be dispatched by calling
@@ -26,7 +26,7 @@ import os
 
 
 def _load_server_class():
-    """Compile BlenderMCPServer from addon.py against stub modules."""
+    """Compile BlenderMCPServer against stub modules."""
     source = ROOT_ADDON.read_text(encoding="utf-8")
     tree = ast.parse(source)
 
@@ -35,7 +35,7 @@ def _load_server_class():
         for node in tree.body
         if isinstance(node, ast.ClassDef) and node.name == "BlenderMCPServer"
     ]
-    assert body, "BlenderMCPServer not found in addon.py"
+    assert body, "BlenderMCPServer not found in extension"
 
     main_thread = threading.current_thread()
     registered = {}

@@ -3,16 +3,17 @@
 - Use `Cargo.toml`'s `package.version` as the release version. Increment the
   patch for fixes, the minor version for compatible features, and the major
   version for incompatible public behavior. Preserve the `+mod` build suffix.
-- Keep `addon.py`'s `ADDON_VERSION` and `pyproject.toml`'s `project.version`
-  identical to the full Cargo version, including `+mod`. Update the affected
-  lock files when changing a release version.
-- Set `addon.py`'s `bl_info["version"]` to the release's numeric
-  `(major, minor, patch)` tuple. For `1.9.1+mod`, use `(1, 9, 1)`.
-- Increment `addon.py`'s `ADDON_PROTOCOL_VERSION` and `src/addon.rs`'s
-  `PROTOCOL_VERSION` together when wire framing, authentication, or required
-  command parameters or response fields change. Never decrease these numbers.
+- `build.rs` generates the extension manifest, protocol metadata, and ZIP.
+  Do not add release versions to Python sources or `pyproject.toml`.
+  Update `Cargo.lock` when changing the release version.
+- Increment `Cargo.toml`'s `package.metadata.blender.protocol-version` when
+  wire framing, authentication, or required command parameters or response
+  fields change. Never decrease this number.
 - Keep the protocol number unchanged for fixes and features that preserve
   the existing command and response contract. A release version change does
   not require a protocol change.
-- Run `just verify` before committing version changes. Its Rust tests check
-  that the bundled add-on version, numeric tuple, and protocol match the server.
+- Run `just verify` before committing version changes. Its tests check that
+  the packaged extension version, numeric tuple, and protocol match the server.
+- After changing add-on dependencies, run `uv lock` and `just sync-wheels`.
+  Commit the wheels selected from `uv.lock`; the build checks their hashes.
+- Run `just verify-addon PATH_TO_BLENDER` for extension packaging changes.

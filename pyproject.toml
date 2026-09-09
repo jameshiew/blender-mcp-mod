@@ -1,19 +1,30 @@
 [project]
 name = "blender-mcp-addon-tests"
-version = "2.0.0+mod"
-requires-python = ">=3.10"
-dependencies = []
+dynamic = ["version"]
+requires-python = ">=3.11"
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "Cargo.toml"
+pattern = '(?m)^version = "(?P<version>[^"]+)"$'
+
+[tool.uv]
+package = false
+cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }]
 
 [tool.pytest.ini_options]
 python_files = ["test_*.py"]
 testpaths = ["tests"]
 
 [dependency-groups]
-dev = [
-    "pytest>=9.1.1",
+addon = [
     "requests>=2.34.2",
+]
+dev = [
+    { include-group = "addon" },
+    "pytest>=9.1.1",
     "ruff>=0.16.6",
 ]
-
-[tool.uv]
-package = false

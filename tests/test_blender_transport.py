@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from conftest import ROOT_ADDON, client_tls_context
+from conftest import RELEASE_VERSION, blender_environment, client_tls_context
 from test_rust_server import Client
 
 
@@ -16,29 +16,41 @@ from test_rust_server import Client
     reason="Set BLENDER_TEST_EXECUTABLE for the native Blender GUI test",
 )
 def test_native_blender_transport(binary, tmp_path, connection_credentials):
+    environment = blender_environment(tmp_path / "profile")
+    subprocess.run(
+        [
+            str(binary),
+            "install-addon",
+            "--blender",
+            os.environ["BLENDER_TEST_EXECUTABLE"],
+        ],
+        env=environment,
+        check=True,
+        capture_output=True,
+    )
     ready = tmp_path / "ready.json"
     stop = tmp_path / "stop"
     forbidden = tmp_path / "unauthorized.txt"
     allowed = tmp_path / "authorized.txt"
     script = tmp_path / "start.py"
     script.write_text(f"""import bpy
-import importlib.util
+import addon_utils
 import json
 import sys
 from pathlib import Path
 
-spec = importlib.util.spec_from_file_location("transport_test_addon", {str(ROOT_ADDON)!r})
-addon = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = addon
-spec.loader.exec_module(addon)
+name = "bl_ext.user_default.blender_mcp"
+addon_utils.enable(name, default_set=True)
+addon = sys.modules[name]
+addon_utils.disable(name, default_set=True)
 server = addon.BlenderMCPServer(port=0)
 bpy.types.blendermcp_server = server
-addon.register()
+addon_utils.enable(name, default_set=True)
 Path({str(ready)!r}).write_text(json.dumps({{"port": server.port, "running": server.running, "error": server.last_error, "version": bpy.app.version_string}}))
 
 def finish():
     if Path({str(stop)!r}).exists():
-        addon.unregister()
+        addon_utils.disable(name, default_set=True)
         bpy.ops.wm.quit_blender()
         return None
     return 0.1
@@ -51,11 +63,15 @@ bpy.app.timers.register(finish)
                 os.environ["BLENDER_TEST_EXECUTABLE"],
                 "--factory-startup",
                 "--disable-autoexec",
+                "--offline-mode",
+                "--python-exit-code",
+                "1",
                 "--python",
                 str(script),
             ],
             stdout=log,
             stderr=subprocess.STDOUT,
+            env=environment,
         )
         client = None
         try:
@@ -97,6 +113,11 @@ bpy.app.timers.register(finish)
             client = Client(
                 binary, tmp_path, server=SimpleNamespace(port=state["port"])
             )
+            status = json.loads(
+                client.call("get_addon_status", {})["content"][0]["text"]
+            )
+            assert status["up_to_date"], status
+            assert status["addon_build_version"] == RELEASE_VERSION
             result = client.call(
                 "execute_blender_code",
                 {

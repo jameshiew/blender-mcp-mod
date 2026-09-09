@@ -1,0 +1,16 @@
+schema_version = "1.0.0"
+id = "blender_mcp"
+name = "MCP for Blender"
+tagline = "Connect Blender to AI clients through MCP"
+maintainer = "James Hiew <james@hiew.net>"
+type = "add-on"
+website = "https://github.com/jameshiew/blender-mcp-mod"
+blender_version_min = "4.2.0"
+license = ["SPDX:MIT"]
+
+[permissions]
+network = "Connect to MCP clients and online asset providers"
+files = "Read connection credentials and import or export assets"
+
+[build]
+paths_exclude_pattern = ["__pycache__/", ".*", "*.in", "*.zip"]

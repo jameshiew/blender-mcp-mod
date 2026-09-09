@@ -5,7 +5,6 @@ __pycache__/
 *.py[oc]
 build/
 dist/
-wheels/
 *.egg-info
 .DS_Store
 .pytest_cache/
@@ -16,7 +15,6 @@ assets/
 scripts/
 target/
 pyproject.toml
-uv.lock
 README.md
 Dockerfile
 .dockerignore

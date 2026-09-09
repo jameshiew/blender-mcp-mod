@@ -1,8 +1,4 @@
-"""Shared paths for the test suite.
-
-These tests read the root addon.py as a source file (it cannot be imported
-without bpy), so they need the repo root rather than the tests directory.
-"""
+"""Shared paths for the test suite."""
 
 from __future__ import annotations
 
@@ -12,11 +8,45 @@ import os
 import ssl
 import subprocess
 import tempfile
+import tomllib
+import zipfile
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ROOT_ADDON = REPO_ROOT / "addon.py"
+ROOT_ADDON = REPO_ROOT / "extension" / "__init__.py"
+CARGO_PACKAGE = tomllib.loads((REPO_ROOT / "Cargo.toml").read_text())["package"]
+RELEASE_VERSION = CARGO_PACKAGE["version"]
+RELEASE_TUPLE = [
+    int(part) for part in RELEASE_VERSION.split("+")[0].split("-")[0].split(".")
+]
+PROTOCOL_VERSION = CARGO_PACKAGE["metadata"]["blender"]["protocol-version"]
+
+
+@pytest.fixture(scope="session")
+def addon_package(binary, tmp_path_factory):
+    path = tmp_path_factory.mktemp("package") / "addon.zip"
+    subprocess.run(
+        [str(binary), "package-addon", "--output", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    return path
+
+
+@pytest.fixture(scope="session")
+def unpacked_addon(addon_package, tmp_path_factory):
+    directory = tmp_path_factory.mktemp("extension")
+    with zipfile.ZipFile(addon_package) as archive:
+        archive.extractall(directory)
+    return directory
+
+
+def blender_environment(directory):
+    environment = dict(os.environ, BLENDER_USER_RESOURCES=str(directory))
+    for suffix in ("CONFIG", "SCRIPTS", "EXTENSIONS", "DATAFILES"):
+        environment["BLENDER_USER_" + suffix] = str(directory / suffix.lower())
+    return environment
 
 
 @pytest.fixture(scope="session")

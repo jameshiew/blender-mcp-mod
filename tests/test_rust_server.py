@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from conftest import REPO_ROOT
+from conftest import PROTOCOL_VERSION, RELEASE_TUPLE, RELEASE_VERSION, ROOT_ADDON
 from test_server_threading import BlenderMCPServer
 
 logger = logging.getLogger(__name__)
@@ -111,9 +111,9 @@ class Client:
                 return {"status": "error", "message": str(error)}
         elif name == "get_addon_info":
             result = {
-                "protocol_version": 7,
-                "addon_version": [2, 0, 0],
-                "addon_build_version": "2.0.0+mod",
+                "protocol_version": PROTOCOL_VERSION,
+                "addon_version": RELEASE_TUPLE,
+                "addon_build_version": RELEASE_VERSION,
                 "capabilities": ["execute_code"],
                 "blender_version": "test",
             }
@@ -374,25 +374,21 @@ def test_local_rodin_images_are_encoded(client, tmp_path):
     ]
 
 
-def test_installer_binary_contains_addon(binary, tmp_path):
-    subprocess.run(
-        [str(binary), "install-addon", "--addons-dir", str(tmp_path)],
-        check=True,
-        capture_output=True,
-    )
-    assert (tmp_path / "blendermcp.py").read_bytes() == (
-        REPO_ROOT / "addon.py"
-    ).read_bytes()
+def test_binary_contains_addon(unpacked_addon):
+    assert (unpacked_addon / "__init__.py").read_bytes() == ROOT_ADDON.read_bytes()
 
 
-@pytest.mark.parametrize("version", [None, "1.6.0", "1.9.1+mod", "2.0.0", "2.0.0+mod"])
+@pytest.mark.parametrize(
+    "version",
+    [None, "1.6.0", "2.0.0+mod", RELEASE_VERSION.split("+")[0], RELEASE_VERSION],
+)
 def test_addon_status_checks_build_version(client, version):
-    result = {"protocol_version": 7, "addon_version": [2, 0, 0]}
+    result = {"protocol_version": PROTOCOL_VERSION, "addon_version": RELEASE_TUPLE}
     if version is not None:
         result["addon_build_version"] = version
     client.respond = lambda command: {"status": "success", "result": result}
 
     status = json.loads(client.call("get_addon_status", {})["content"][0]["text"])
 
-    assert status["up_to_date"] is (version == "2.0.0+mod")
-    assert status["expected_addon_version"] == "2.0.0+mod"
+    assert status["up_to_date"] is (version == RELEASE_VERSION)
+    assert status["expected_addon_version"] == RELEASE_VERSION

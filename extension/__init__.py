@@ -11,6 +11,7 @@ import stat
 from pathlib import Path
 import queue
 import time
+import tomllib
 import requests
 import tempfile
 import traceback
@@ -24,25 +25,35 @@ import hashlib, hmac, base64
 import os.path as osp
 from urllib.parse import quote
 from contextlib import redirect_stdout, suppress
-
-bl_info = {
-    "name": "MCP for Blender",
-    "author": "BlenderMCP",
-    "version": (2, 0, 0),
-    "blender": (3, 0, 0),
-    "location": "View3D > Sidebar > MCP for Blender",
-    "description": "Connect Blender to Claude via MCP",
-    "category": "Interface",
-}
-
-ADDON_VERSION = "2.0.0+mod"
-ADDON_PROTOCOL_VERSION = 7
+from functools import cache
 
 RODIN_FREE_TRIAL_KEY = "vibecoding"
 
 # Add User-Agent as required by Poly Haven API
 REQ_HEADERS = requests.utils.default_headers()
 REQ_HEADERS.update({"User-Agent": "blender-mcp"})
+
+
+@cache
+def _addon_metadata():
+    directory = Path(__file__).parent
+    with (directory / "blender_manifest.toml").open("rb") as file:
+        manifest = tomllib.load(file)
+    protocol = json.loads((directory / "protocol.json").read_text())["version"]
+    return manifest, protocol
+
+
+def _http_get(*args, **kwargs):
+    if not bpy.app.online_access:
+        raise RuntimeError("Online access is disabled in Blender preferences")
+    return requests.get(*args, **kwargs)
+
+
+def _http_post(*args, **kwargs):
+    if not bpy.app.online_access:
+        raise RuntimeError("Online access is disabled in Blender preferences")
+    return requests.post(*args, **kwargs)
+
 
 # region Poly Pizza constants and helpers
 
@@ -176,7 +187,7 @@ def get_blendermcp_addon_preferences(context=None):
     """Get add-on preferences object if available."""
     if context is None:
         context = bpy.context
-    addon = context.preferences.addons.get(__name__)
+    addon = context.preferences.addons.get(__package__)
     return addon.preferences if addon else None
 
 
@@ -646,11 +657,15 @@ class BlenderMCPServer:
 
     def get_addon_info(self):
         """Version/capability handshake for the MCP server (and install tooling)."""
+        manifest, protocol = _addon_metadata()
+        version = manifest["version"]
         return {
-            "name": bl_info.get("name", "MCP for Blender"),
-            "addon_version": list(bl_info.get("version", (0, 0))),
-            "addon_build_version": ADDON_VERSION,
-            "protocol_version": ADDON_PROTOCOL_VERSION,
+            "name": manifest["name"],
+            "addon_version": [
+                int(part) for part in version.split("+")[0].split("-")[0].split(".")
+            ],
+            "addon_build_version": version,
+            "protocol_version": protocol,
             "capabilities": sorted(
                 [
                     "get_scene_info",
@@ -897,7 +912,7 @@ class BlenderMCPServer:
                     "error": f"Invalid asset type: {asset_type}. Must be one of: hdris, textures, models, all"
                 }
 
-            response = requests.get(
+            response = _http_get(
                 f"https://api.polyhaven.com/categories/{asset_type}",
                 headers=REQ_HEADERS,
             )
@@ -926,7 +941,7 @@ class BlenderMCPServer:
             if categories:
                 params["categories"] = categories
 
-            response = requests.get(url, params=params, headers=REQ_HEADERS)
+            response = _http_get(url, params=params, headers=REQ_HEADERS)
             if response.status_code == 200:
                 # Limit the response size to avoid overwhelming Blender
                 assets = response.json()
@@ -954,7 +969,7 @@ class BlenderMCPServer:
     ):
         try:
             # First get the files information
-            files_response = requests.get(
+            files_response = _http_get(
                 f"https://api.polyhaven.com/files/{asset_id}", headers=REQ_HEADERS
             )
             if files_response.status_code != 200:
@@ -984,7 +999,7 @@ class BlenderMCPServer:
                         suffix=f".{file_format}", delete=False
                     ) as tmp_file:
                         # Download the file
-                        response = requests.get(file_url, headers=REQ_HEADERS)
+                        response = _http_get(file_url, headers=REQ_HEADERS)
                         if response.status_code != 200:
                             return {
                                 "error": f"Failed to download HDRI: {response.status_code}"
@@ -1103,9 +1118,7 @@ class BlenderMCPServer:
                                     suffix=f".{file_format}", delete=False
                                 ) as tmp_file:
                                     # Download the file
-                                    response = requests.get(
-                                        file_url, headers=REQ_HEADERS
-                                    )
+                                    response = _http_get(file_url, headers=REQ_HEADERS)
                                     if response.status_code == 200:
                                         tmp_file.write(response.content)
                                         tmp_path = tmp_file.name
@@ -1268,7 +1281,7 @@ class BlenderMCPServer:
                         main_file_name = file_url.split("/")[-1]
                         main_file_path = os.path.join(temp_dir, main_file_name)
 
-                        response = requests.get(file_url, headers=REQ_HEADERS)
+                        response = _http_get(file_url, headers=REQ_HEADERS)
                         if response.status_code != 200:
                             return {
                                 "error": f"Failed to download model: {response.status_code}"
@@ -1314,7 +1327,7 @@ class BlenderMCPServer:
                                 )
 
                                 # Download the included file
-                                include_response = requests.get(
+                                include_response = _http_get(
                                     include_url, headers=REQ_HEADERS
                                 )
                                 if include_response.status_code == 200:
@@ -1817,7 +1830,7 @@ class BlenderMCPServer:
                 files.append(("prompt", (None, text_prompt)))
             if bbox_condition:
                 files.append(("bbox_condition", (None, json.dumps(bbox_condition))))
-            response = requests.post(
+            response = _http_post(
                 "https://hyperhuman.deemos.com/api/v2/rodin",
                 headers={
                     "Authorization": f"Bearer {api_key}",
@@ -1848,7 +1861,7 @@ class BlenderMCPServer:
                 req_data["prompt"] = text_prompt
             if bbox_condition:
                 req_data["bbox_condition"] = bbox_condition
-            response = requests.post(
+            response = _http_post(
                 "https://queue.fal.run/fal-ai/hyper3d/rodin",
                 headers={
                     "Authorization": f"Key {api_key}",
@@ -1875,7 +1888,7 @@ class BlenderMCPServer:
         api_key = self._get_hyper3d_api_key()
         if not api_key:
             return {"error": "Hyper3D API key is not given"}
-        response = requests.post(
+        response = _http_post(
             "https://hyperhuman.deemos.com/api/v2/status",
             headers={
                 "Authorization": f"Bearer {api_key}",
@@ -1892,7 +1905,7 @@ class BlenderMCPServer:
         api_key = self._get_hyper3d_api_key()
         if not api_key:
             return {"error": "Hyper3D API key is not given"}
-        response = requests.get(
+        response = _http_get(
             f"https://queue.fal.run/fal-ai/hyper3d/requests/{request_id}/status",
             headers={
                 "Authorization": f"KEY {api_key}",
@@ -1992,7 +2005,7 @@ class BlenderMCPServer:
         api_key = self._get_hyper3d_api_key()
         if not api_key:
             return {"succeed": False, "error": "Hyper3D API key is not given"}
-        response = requests.post(
+        response = _http_post(
             "https://hyperhuman.deemos.com/api/v2/download",
             headers={
                 "Authorization": f"Bearer {api_key}",
@@ -2011,7 +2024,7 @@ class BlenderMCPServer:
 
                 try:
                     # Download the content
-                    response = requests.get(i["url"], stream=True)
+                    response = _http_get(i["url"], stream=True)
                     response.raise_for_status()  # Raise an exception for HTTP errors
 
                     # Write the content to the temporary file
@@ -2063,7 +2076,7 @@ class BlenderMCPServer:
         api_key = self._get_hyper3d_api_key()
         if not api_key:
             return {"succeed": False, "error": "Hyper3D API key is not given"}
-        response = requests.get(
+        response = _http_get(
             f"https://queue.fal.run/fal-ai/hyper3d/requests/{request_id}",
             headers={
                 "Authorization": f"Key {api_key}",
@@ -2080,7 +2093,7 @@ class BlenderMCPServer:
 
         try:
             # Download the content
-            response = requests.get(data_["model_mesh"]["url"], stream=True)
+            response = _http_get(data_["model_mesh"]["url"], stream=True)
             response.raise_for_status()  # Raise an exception for HTTP errors
 
             # Write the content to the temporary file
@@ -2133,7 +2146,7 @@ class BlenderMCPServer:
             try:
                 headers = {"Authorization": f"Token {api_key}"}
 
-                response = requests.get(
+                response = _http_get(
                     "https://api.sketchfab.com/v3/me",
                     headers=headers,
                     timeout=30,  # Add timeout of 30 seconds
@@ -2212,7 +2225,7 @@ class BlenderMCPServer:
             headers = {"Authorization": f"Token {api_key}"}
 
             # Use the search endpoint as specified in the API documentation
-            response = requests.get(
+            response = _http_get(
                 "https://api.sketchfab.com/v3/search",
                 headers=headers,
                 params=params,
@@ -2264,7 +2277,7 @@ class BlenderMCPServer:
             headers = {"Authorization": f"Token {api_key}"}
 
             # Get model info which includes thumbnails
-            response = requests.get(
+            response = _http_get(
                 f"https://api.sketchfab.com/v3/models/{uid}",
                 headers=headers,
                 timeout=30,
@@ -2302,7 +2315,7 @@ class BlenderMCPServer:
                 return {"error": "Thumbnail URL not found"}
 
             # Download the thumbnail image
-            img_response = requests.get(thumbnail_url, timeout=30)
+            img_response = _http_get(thumbnail_url, timeout=30)
             if img_response.status_code != 200:
                 return {
                     "error": f"Failed to download thumbnail: {img_response.status_code}"
@@ -2360,7 +2373,7 @@ class BlenderMCPServer:
             # Request download URL using the exact endpoint from the documentation
             download_endpoint = f"https://api.sketchfab.com/v3/models/{uid}/download"
 
-            response = requests.get(
+            response = _http_get(
                 download_endpoint,
                 headers=headers,
                 timeout=30,  # Add timeout of 30 seconds
@@ -2397,7 +2410,7 @@ class BlenderMCPServer:
                 }
 
             # Download the model (already has timeout)
-            model_response = requests.get(download_url, timeout=60)  # 60 second timeout
+            model_response = _http_get(download_url, timeout=60)  # 60 second timeout
 
             if model_response.status_code != 200:
                 return {
@@ -2685,7 +2698,7 @@ class BlenderMCPServer:
             else:
                 url = f"{POLYPIZZA_API_BASE}/search"
 
-            response = requests.get(url, headers=headers, params=params, timeout=30)
+            response = _http_get(url, headers=headers, params=params, timeout=30)
 
             if response.status_code in (401, 403):
                 return {
@@ -2758,7 +2771,7 @@ class BlenderMCPServer:
             headers = dict(REQ_HEADERS)
             headers["x-auth-token"] = api_key
 
-            response = requests.get(
+            response = _http_get(
                 f"{POLYPIZZA_API_BASE}/model/{quote(str(model_id), safe='')}",
                 headers=headers,
                 timeout=30,
@@ -2792,7 +2805,7 @@ class BlenderMCPServer:
 
             # The CDN takes no API key and must never be sent one: it is a
             # separate host from the API.
-            file_response = requests.get(
+            file_response = _http_get(
                 download_url, headers=dict(REQ_HEADERS), timeout=60
             )
 
@@ -3183,7 +3196,7 @@ class BlenderMCPServer:
                 "POST", "/", headParams, data, service, region, secret_id, secret_key
             )
 
-            response = requests.post(endpoint, headers=headers, data=json.dumps(data))
+            response = _http_post(endpoint, headers=headers, data=json.dumps(data))
 
             if response.status_code == 200:
                 return response.json()
@@ -3225,7 +3238,7 @@ class BlenderMCPServer:
             if image:
                 if re.match(r"^https?://", image, re.IGNORECASE) is not None:
                     try:
-                        resImg = requests.get(image)
+                        resImg = _http_get(image)
                         resImg.raise_for_status()
                         image_base64 = base64.b64encode(resImg.content).decode("ascii")
                         data["image"] = image_base64
@@ -3242,7 +3255,7 @@ class BlenderMCPServer:
                     except Exception as e:
                         return {"error": f"Image encoding failed: {str(e)}"}
 
-            response = requests.post(
+            response = _http_post(
                 f"{base_url}/generate",
                 json=data,
             )
@@ -3294,7 +3307,7 @@ class BlenderMCPServer:
                 "POST", "/", headParams, data, service, region, secret_id, secret_key
             )
 
-            response = requests.post(endpoint, headers=headers, data=json.dumps(data))
+            response = _http_post(endpoint, headers=headers, data=json.dumps(data))
 
             if response.status_code == 200:
                 return response.json()
@@ -3321,7 +3334,7 @@ class BlenderMCPServer:
             temp_dir = tempfile.mkdtemp(prefix="hunyuan_glb_")
             glb_path = osp.join(temp_dir, "model.glb")
             try:
-                glb_response = requests.get(zip_file_url, stream=True)
+                glb_response = _http_get(zip_file_url, stream=True)
                 glb_response.raise_for_status()
                 with open(glb_path, "wb") as f:
                     for chunk in glb_response.iter_content(chunk_size=8192):
@@ -3363,7 +3376,7 @@ class BlenderMCPServer:
         zip_file_path = osp.join(temp_dir, "model.zip")
         obj_file_path = osp.join(temp_dir, "model.obj")
         try:
-            zip_response = requests.get(zip_file_url, stream=True)
+            zip_response = _http_get(zip_file_url, stream=True)
             zip_response.raise_for_status()
             with open(zip_file_path, "wb") as f:
                 for chunk in zip_response.iter_content(chunk_size=8192):
@@ -3434,7 +3447,7 @@ class BlenderMCPServer:
 
 # Blender Addon Preferences
 class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
-    bl_idname = __name__
+    bl_idname = __package__
 
     hyper3d_api_key: bpy.props.StringProperty(
         name="Hyper3D API Key",
@@ -3687,6 +3700,7 @@ class BLENDERMCP_OT_StopServer(bpy.types.Operator):
 
 # Registration functions
 def register():
+    _addon_metadata()
     bpy.types.Scene.blendermcp_port = IntProperty(
         name="Port",
         description="Port for the MCP for Blender server",
@@ -3893,7 +3907,3 @@ def unregister():
     del bpy.types.Scene.blendermcp_hunyuan3d_texture
 
     print("BlenderMCP addon unregistered")
-
-
-if __name__ == "__main__":
-    register()
