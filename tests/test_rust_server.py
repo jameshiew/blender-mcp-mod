@@ -31,7 +31,6 @@ class Client:
             os.environ,
             BLENDER_HOST="127.0.0.1",
             BLENDER_PORT=str(server.port if server else self.listener.getsockname()[1]),
-            BLENDER_USER_ADDONS=str(directory),
         )
         self.process = subprocess.Popen(
             [str(binary)],

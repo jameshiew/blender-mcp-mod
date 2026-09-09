@@ -1344,7 +1344,7 @@ class BlenderMCPServer:
                         elif file_format == "fbx":
                             bpy.ops.import_scene.fbx(filepath=main_file_path)
                         elif file_format == "obj":
-                            bpy.ops.import_scene.obj(filepath=main_file_path)
+                            bpy.ops.wm.obj_import(filepath=main_file_path)
                         elif file_format == "blend":
                             # For blend files, we need to append or link
                             with bpy.data.libraries.load(
@@ -1604,25 +1604,15 @@ class BlenderMCPServer:
 
             # Handle ARM texture (Ambient Occlusion, Roughness, Metallic)
             if "arm" in texture_nodes:
-                # Blender 4.0 removed ShaderNodeSeparateRGB (renamed to
-                # ShaderNodeSeparateColor, added in 3.3). Branch on the running
-                # Blender version so pre-4.0 behavior is untouched.
-                if bpy.app.version >= (4, 0):
-                    sep = nodes.new(
-                        type="ShaderNodeSeparateColor"
-                    )  # defaults to mode='RGB'
-                    in_socket, ch_r, ch_g, ch_b = "Color", "Red", "Green", "Blue"
-                else:
-                    sep = nodes.new(type="ShaderNodeSeparateRGB")
-                    in_socket, ch_r, ch_g, ch_b = "Image", "R", "G", "B"
+                sep = nodes.new(type="ShaderNodeSeparateColor")
                 sep.location = (-200, -100)
-                links.new(texture_nodes["arm"].outputs["Color"], sep.inputs[in_socket])
+                links.new(texture_nodes["arm"].outputs["Color"], sep.inputs["Color"])
 
                 # Connect Roughness (G) if no dedicated roughness map
                 if not any(
                     map_name in texture_nodes for map_name in ["roughness", "rough"]
                 ):
-                    links.new(sep.outputs[ch_g], principled.inputs["Roughness"])
+                    links.new(sep.outputs["Green"], principled.inputs["Roughness"])
                     print("Connected ARM.G to Roughness")
 
                 # Connect Metallic (B) if no dedicated metallic map
@@ -1630,7 +1620,7 @@ class BlenderMCPServer:
                     map_name in texture_nodes
                     for map_name in ["metallic", "metalness", "metal"]
                 ):
-                    links.new(sep.outputs[ch_b], principled.inputs["Metallic"])
+                    links.new(sep.outputs["Blue"], principled.inputs["Metallic"])
                     print("Connected ARM.B to Metallic")
 
                 # For AO (R channel), multiply with base color if we have one
@@ -1653,7 +1643,7 @@ class BlenderMCPServer:
 
                     # Connect through the mix node
                     links.new(base_color_node.outputs["Color"], mix_node.inputs[1])
-                    links.new(sep.outputs[ch_r], mix_node.inputs[2])
+                    links.new(sep.outputs["Red"], mix_node.inputs[2])
                     links.new(
                         mix_node.outputs["Color"], principled.inputs["Base Color"]
                     )
@@ -3371,7 +3361,6 @@ class BlenderMCPServer:
                 with suppress(Exception):
                     shutil.rmtree(temp_dir)
 
-        # Fallback: ZIP/OBJ import (legacy)
         temp_dir = tempfile.mkdtemp(prefix="tencent_obj_")
         zip_file_path = osp.join(temp_dir, "model.zip")
         obj_file_path = osp.join(temp_dir, "model.obj")
@@ -3410,10 +3399,7 @@ class BlenderMCPServer:
                     "succeed": False,
                     "error": "OBJ file not found after extraction",
                 }
-            if bpy.app.version >= (4, 0, 0):
-                bpy.ops.wm.obj_import(filepath=obj_file_path)
-            else:
-                bpy.ops.import_scene.obj(filepath=obj_file_path)
+            bpy.ops.wm.obj_import(filepath=obj_file_path)
             imported_objs = [
                 obj for obj in bpy.context.selected_objects if obj.type == "MESH"
             ]

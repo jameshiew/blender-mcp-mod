@@ -107,8 +107,8 @@ def _load_addon(monkeypatch, scene, selected_objects=()):
     handlers.depsgraph_update_post = []
 
     app = types.ModuleType("bpy.app")
-    app.version = (4, 2, 0)
-    app.version_string = "4.2.0"
+    app.version = (5, 0, 0)
+    app.version_string = "5.0.0"
     app.background = False
     app.online_access = True
     app.handlers = handlers

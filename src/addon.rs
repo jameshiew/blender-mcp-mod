@@ -45,7 +45,7 @@ fn run(blender: &Path, arguments: &[&str]) -> Result<()> {
         .status()
         .with_context(|| {
             format!(
-                "Cannot run {}; use --blender PATH to select Blender 4.2 or later",
+                "Cannot run {}; use --blender PATH to select Blender 5.0 or later",
                 blender.display()
             )
         })?;

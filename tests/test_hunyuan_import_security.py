@@ -23,9 +23,6 @@ def _install_bpy_stubs(monkeypatch, scene):
             gltf=lambda **_kwargs: (_ for _ in ()).throw(
                 AssertionError("unexpected gltf import")
             ),
-            obj=lambda **_kwargs: (_ for _ in ()).throw(
-                AssertionError("unexpected obj import")
-            ),
         ),
         wm=types.SimpleNamespace(
             obj_import=lambda **_kwargs: (_ for _ in ()).throw(
@@ -52,8 +49,8 @@ def _install_bpy_stubs(monkeypatch, scene):
     handlers.depsgraph_update_post = []
 
     app = types.ModuleType("bpy.app")
-    app.version = (4, 2, 0)
-    app.version_string = "4.2.0"
+    app.version = (5, 0, 0)
+    app.version_string = "5.0.0"
     app.background = False
     app.online_access = True
     app.handlers = handlers

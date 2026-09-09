@@ -54,7 +54,7 @@ def test_package_metadata_and_wheels(addon_package):
         assert archive.testzip() is None
         manifest = tomllib.loads(archive.read("blender_manifest.toml").decode())
         assert manifest["version"] == RELEASE_VERSION
-        assert manifest["blender_version_min"] == "4.2.0"
+        assert manifest["blender_version_min"] == "5.0.0"
         assert manifest["license"] == ["SPDX:MIT"]
         assert set(manifest["permissions"]) == {"network", "files"}
         assert json.loads(archive.read("protocol.json"))["version"] == PROTOCOL_VERSION
@@ -209,8 +209,11 @@ def test_blender_validates_and_installs_extension(binary, addon_package, tmp_pat
     script = tmp_path / "check.py"
     script.write_text(f"""import addon_utils
 import bpy
+import io
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+import zipfile
 
 sys.path[:] = [path for path in sys.path if not path.endswith("site-packages")]
 for module in list(sys.modules):
@@ -225,6 +228,7 @@ info = addon.BlenderMCPServer().get_addon_info()
 assert info["addon_build_version"] == {RELEASE_VERSION!r}, info
 assert info["addon_version"] == {RELEASE_TUPLE!r}, info
 assert info["protocol_version"] == {PROTOCOL_VERSION!r}, info
+assert bpy.app.version >= (5, 0, 0)
 assert Path(addon.requests.__file__).resolve().is_relative_to(Path({str(tmp_path)!r}).resolve()), addon.requests.__file__
 assert not bpy.app.online_access
 try:
@@ -233,6 +237,53 @@ except RuntimeError as error:
     assert "Online access is disabled" in str(error)
 else:
     raise AssertionError("Offline request was allowed")
+
+server = addon.BlenderMCPServer()
+for map_type in ("arm", "color"):
+    image = bpy.data.images.new("test_" + map_type, width=1, height=1)
+    image.filepath_raw = str(Path({str(tmp_path)!r}) / (image.name + ".png"))
+    image.file_format = "PNG"
+    image.save()
+result = server.set_texture("Cube", "test")
+assert result.get("success"), result
+nodes = bpy.data.objects["Cube"].active_material.node_tree.nodes
+separate = next(node for node in nodes if node.bl_idname == "ShaderNodeSeparateColor")
+assert separate.mode == "RGB"
+assert separate.inputs["Color"].links[0].from_node.image.name == "test_arm"
+for channel, target in (("Green", "Roughness"), ("Blue", "Metallic")):
+    assert separate.outputs[channel].links[0].to_socket.name == target
+assert separate.outputs["Red"].links[0].to_node.blend_type == "MULTIPLY"
+
+obj_data = b"o Triangle\\nv 0 0 0\\nv 1 0 0\\nv 0 1 0\\nf 1 2 3\\n"
+archive = io.BytesIO()
+with zipfile.ZipFile(archive, "w") as zipped:
+    zipped.writestr("model.obj", obj_data)
+files = {{"obj": {{"1k": {{"obj": {{"url": "https://example.invalid/model.obj"}}}}}}}}
+
+def fake_get(url, **kwargs):
+    content = archive.getvalue() if url.endswith(".zip") else obj_data
+    return SimpleNamespace(
+        status_code=200,
+        content=content,
+        json=lambda: files,
+        raise_for_status=lambda: None,
+        iter_content=lambda chunk_size: [content],
+    )
+
+original_get = addon._http_get
+addon._http_get = fake_get
+try:
+    result = server.download_polyhaven_asset("test", "models", file_format="obj")
+    assert result.get("success"), result
+    assert result["imported_objects"], result
+    result = server.import_generated_asset_hunyuan_ai("Hunyuan", "https://example.invalid/model.zip")
+    assert result.get("succeed"), result
+    assert result["name"] == "Hunyuan", result
+    for obj in bpy.context.selected_objects:
+        assert len(obj.data.polygons) == 1
+finally:
+    addon._http_get = original_get
+
 addon_utils.disable(name, default_set=True)
 assert not hasattr(bpy.types.Scene, "blendermcp_port")
 addon_utils.enable(name, default_set=True)

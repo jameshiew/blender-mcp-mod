@@ -5,7 +5,7 @@ tagline = "Connect Blender to AI clients through MCP"
 maintainer = "James Hiew <james@hiew.net>"
 type = "add-on"
 website = "https://github.com/jameshiew/blender-mcp-mod"
-blender_version_min = "4.2.0"
+blender_version_min = "5.0.0"
 license = ["SPDX:MIT"]
 
 [permissions]

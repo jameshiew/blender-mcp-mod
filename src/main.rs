@@ -23,7 +23,7 @@ enum Command {
         #[arg(long)]
         output: Option<PathBuf>,
     },
-    #[command(about = "Install the bundled extension using Blender 4.2 or later")]
+    #[command(about = "Install the bundled extension using Blender 5.0 or later")]
     InstallAddon {
         #[arg(long, default_value = "blender")]
         blender: PathBuf,
@@ -50,9 +50,7 @@ async fn main() -> Result<()> {
             security::setup(&directory)?;
             addon::install(&blender, &repo)?;
             println!("Installed MCP for Blender {}.", env!("CARGO_PKG_VERSION"));
-            println!(
-                "Disable any legacy MCP add-on, then enable MCP for Blender in Preferences > Add-ons."
-            );
+            println!("Enable MCP for Blender in Preferences > Add-ons.");
         }
         Some(Command::SetupConnection) => {
             let directory = security::directory()?;
