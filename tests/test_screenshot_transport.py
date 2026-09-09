@@ -1,7 +1,7 @@
 import base64
 from pathlib import Path
 
-from test_polypizza import _load_addon, _scene
+from addon_stub import _load_addon, _scene
 
 
 def test_inline_screenshot_cleans_up_its_temporary_file(monkeypatch):

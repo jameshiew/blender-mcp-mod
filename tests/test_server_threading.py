@@ -60,11 +60,7 @@ def _load_server_class():
     bpy.app = types.SimpleNamespace(background=False, timers=_Timers())
     bpy.context = types.SimpleNamespace(
         scene=types.SimpleNamespace(
-            blendermcp_use_polyhaven=False,
-            blendermcp_use_hyper3d=False,
             blendermcp_use_sketchfab=False,
-            blendermcp_use_polypizza=False,
-            blendermcp_use_hunyuan3d=False,
         )
     )
 
@@ -84,7 +80,6 @@ def _load_server_class():
         "io": __import__("io"),
         "redirect_stdout": __import__("contextlib").redirect_stdout,
         "get_blendermcp_addon_preferences": lambda context=None: None,
-        "RODIN_FREE_TRIAL_KEY": "vibecoding",
     }
     exec(compile(ast.Module(body=body, type_ignores=[]), "<addon>", "exec"), namespace)
     return namespace["BlenderMCPServer"], registered

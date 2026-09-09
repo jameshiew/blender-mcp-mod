@@ -66,11 +66,7 @@ def _load_addon(monkeypatch, scene):
 
 def _scene(sketchfab_enabled):
     return types.SimpleNamespace(
-        blendermcp_use_polyhaven=False,
-        blendermcp_use_hyper3d=False,
-        blendermcp_use_hunyuan3d=False,
         blendermcp_use_sketchfab=sketchfab_enabled,
-        blendermcp_use_polypizza=False,
     )
 
 

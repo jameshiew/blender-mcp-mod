@@ -121,14 +121,6 @@ class Client:
                 "image_data": base64.b64encode(b"image-bytes").decode(),
                 "format": "png",
             }
-        elif name == "create_rodin_job":
-            result = {
-                "submit_time": 1,
-                "uuid": "task",
-                "jobs": {"subscription_key": "subscription"},
-            }
-        elif name == "create_hunyuan_job":
-            result = {"Response": {"JobId": "123"}}
         elif params.get("name") == "missing":
             result = {"error": "Object not found"}
         else:
@@ -197,37 +189,6 @@ CASES = [
         "execute_code",
         {"code": "print('ok')"},
     ),
-    (
-        "get_polyhaven_categories",
-        {},
-        "get_polyhaven_categories",
-        {"asset_type": "hdris"},
-    ),
-    (
-        "search_polyhaven_assets",
-        {},
-        "search_polyhaven_assets",
-        {"asset_type": "all", "categories": None},
-    ),
-    (
-        "download_polyhaven_asset",
-        {"asset_id": "chair", "asset_type": "models"},
-        "download_polyhaven_asset",
-        {
-            "asset_id": "chair",
-            "asset_type": "models",
-            "resolution": "1k",
-            "file_format": None,
-        },
-    ),
-    (
-        "set_texture",
-        {"object_name": "Cube", "texture_id": "wood"},
-        "set_texture",
-        {"object_name": "Cube", "texture_id": "wood"},
-    ),
-    ("get_polyhaven_status", {}, "get_polyhaven_status", {}),
-    ("get_hyper3d_status", {}, "get_hyper3d_status", {}),
     ("get_sketchfab_status", {}, "get_sketchfab_status", {}),
     (
         "search_sketchfab_models",
@@ -247,66 +208,6 @@ CASES = [
         "download_sketchfab_model",
         {"uid": "model", "target_size": 1.7, "normalize_size": True},
     ),
-    ("get_polypizza_status", {}, "get_polypizza_status", {}),
-    (
-        "search_polypizza_models",
-        {"category": "Animals", "licence": "CC0"},
-        "search_polypizza_models",
-        {"query": "", "category": 7, "licence": 1, "animated": False, "limit": 20},
-    ),
-    (
-        "download_polypizza_model",
-        {"model_id": "pizza"},
-        "download_polypizza_model",
-        {"model_id": "pizza", "normalize_size": False, "target_size": 1.0},
-    ),
-    (
-        "generate_hyper3d_model_via_text",
-        {"text_prompt": "chair", "bbox_condition": [1.0, 2.0, 1.0]},
-        "create_rodin_job",
-        {"text_prompt": "chair", "images": None, "bbox_condition": [50, 100, 50]},
-    ),
-    (
-        "generate_hyper3d_model_via_images",
-        {"input_image_urls": ["https://example.com/a.png"]},
-        "create_rodin_job",
-        {
-            "text_prompt": None,
-            "images": ["https://example.com/a.png"],
-            "bbox_condition": None,
-        },
-    ),
-    (
-        "poll_rodin_job_status",
-        {"request_id": "request"},
-        "poll_rodin_job_status",
-        {"request_id": "request"},
-    ),
-    (
-        "import_generated_asset",
-        {"name": "Chair", "task_uuid": "task"},
-        "import_generated_asset",
-        {"name": "Chair", "task_uuid": "task"},
-    ),
-    ("get_hunyuan3d_status", {}, "get_hunyuan3d_status", {}),
-    (
-        "generate_hunyuan3d_model",
-        {"text_prompt": "chair"},
-        "create_hunyuan_job",
-        {"text_prompt": "chair", "image": None},
-    ),
-    (
-        "poll_hunyuan_job_status",
-        {"job_id": "job_123"},
-        "poll_hunyuan_job_status",
-        {"job_id": "job_123"},
-    ),
-    (
-        "import_generated_asset_hunyuan",
-        {"name": "Chair", "zip_file_url": "https://example.com/chair.glb"},
-        "import_generated_asset_hunyuan",
-        {"name": "Chair", "zip_file_url": "https://example.com/chair.glb"},
-    ),
 ]
 
 
@@ -322,13 +223,6 @@ def test_all_tools_over_stdio_and_tcp(client):
             assert result["content"][0]["type"] == "image"
             assert result["content"][0]["mimeType"] == "image/png"
             assert base64.b64decode(result["content"][0]["data"]) == b"image-bytes"
-        elif name.startswith("generate_hyper3d"):
-            assert json.loads(result["content"][0]["text"]) == {
-                "task_uuid": "task",
-                "subscription_key": "subscription",
-            }
-        elif name == "generate_hunyuan3d_model":
-            assert json.loads(result["content"][0]["text"]) == {"job_id": "job_123"}
         elif name == "get_addon_status":
             assert json.loads(result["content"][0]["text"])["up_to_date"] is True
     assert len(client.commands) == len(CASES)
@@ -343,8 +237,6 @@ def test_errors_are_visible_and_server_remains_usable(client):
     for name, arguments in [
         ("execute_blender_code", {"code": 42}),
         ("get_viewport_screenshot", {"max_size": 0}),
-        ("search_polypizza_models", {"category": "invalid"}),
-        ("generate_hyper3d_model_via_images", {"input_image_urls": []}),
     ]:
         assert client.call(name, arguments)["isError"] is True
     assert not client.commands
@@ -361,20 +253,36 @@ def test_errors_are_visible_and_server_remains_usable(client):
     assert client.commands[-1]["params"] == {}
 
 
-def test_local_rodin_images_are_encoded(client, tmp_path):
-    path = tmp_path / "input.png"
-    path.write_bytes(b"local-image")
-    result = client.call(
-        "generate_hyper3d_model_via_images", {"input_image_paths": [str(path)]}
-    )
-    assert not result.get("isError"), result
-    assert client.commands[-1]["params"]["images"] == [
-        [".png", base64.b64encode(b"local-image").decode()]
-    ]
-
-
 def test_binary_contains_addon(unpacked_addon):
     assert (unpacked_addon / "__init__.py").read_bytes() == ROOT_ADDON.read_bytes()
+
+
+def test_removed_integrations_are_not_dispatched(client, monkeypatch):
+    from addon_stub import _load_addon, _scene
+
+    addon = _load_addon(monkeypatch, _scene())
+    server = addon.BlenderMCPServer()
+    for name in (
+        "get_polyhaven_status",
+        "download_polyhaven_asset",
+        "set_texture",
+        "get_hyper3d_status",
+        "generate_hyper3d_model_via_text",
+        "create_rodin_job",
+        "import_generated_asset",
+        "get_polypizza_status",
+        "search_polypizza_models",
+        "get_hunyuan3d_status",
+        "generate_hunyuan3d_model",
+        "create_hunyuan_job",
+        "import_generated_asset_hunyuan",
+    ):
+        response = client.rpc("tools/call", {"name": name, "arguments": {}})
+        assert response["error"]["code"] == -32601
+        response = server.execute_command({"type": name, "params": {}})
+        assert response["status"] == "error"
+        assert "Unknown command type" in response["message"]
+    assert not client.commands
 
 
 @pytest.mark.parametrize(

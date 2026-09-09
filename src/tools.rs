@@ -1,15 +1,11 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine, prelude::BASE64_STANDARD};
 use rmcp::model::{CallToolResult, ContentBlock, Tool};
 use serde_json::{Map, Value, json};
-use tokio::io::AsyncReadExt;
 
-use crate::{
-    addon::PROTOCOL_VERSION,
-    connection::{BlenderConnection, MAX_MESSAGE_BYTES},
-};
+use crate::{addon::PROTOCOL_VERSION, connection::BlenderConnection};
 
 pub struct ToolDefinition {
     pub tool: Tool,
@@ -64,207 +60,9 @@ pub async fn prepare(name: &str, mut args: Map<String, Value>) -> Result<(String
             args.insert("normalize_size".into(), json!(true));
             name
         }
-        "search_polypizza_models" => {
-            args.insert("category".into(), polypizza_id(&args["category"], false)?);
-            args.insert("licence".into(), polypizza_id(&args["licence"], true)?);
-            ensure!(
-                !args["query"].as_str().unwrap_or_default().trim().is_empty()
-                    || !args["category"].is_null()
-                    || !args["licence"].is_null()
-                    || args["animated"] == true,
-                "Poly Pizza needs a keyword or at least one category, licence, or animated filter"
-            );
-            name
-        }
-        "generate_hyper3d_model_via_text" | "generate_hyper3d_model_via_images" => {
-            let bbox = process_bbox(&args["bbox_condition"])?;
-            let (prompt, images) = if name.ends_with("_text") {
-                (
-                    args.remove("text_prompt").context("Missing text_prompt")?,
-                    Value::Null,
-                )
-            } else {
-                (Value::Null, rodin_images(&args).await?)
-            };
-            args = json!({"text_prompt":prompt,"images":images,"bbox_condition":bbox})
-                .as_object()
-                .unwrap()
-                .clone();
-            "create_rodin_job"
-        }
-        "poll_rodin_job_status" => {
-            select_identifier(&mut args, "subscription_key", "request_id")?;
-            args.retain(|_, value| !value.is_null());
-            name
-        }
-        "import_generated_asset" => {
-            select_identifier(&mut args, "task_uuid", "request_id")?;
-            args.retain(|_, value| !value.is_null());
-            name
-        }
-        "generate_hunyuan3d_model" => {
-            ensure!(
-                nonempty(&args["text_prompt"]) || nonempty(&args["input_image_url"]),
-                "Provide text_prompt or input_image_url"
-            );
-            let image = args.remove("input_image_url").unwrap_or(Value::Null);
-            args.insert("image".into(), image);
-            "create_hunyuan_job"
-        }
-        "poll_hunyuan_job_status" => {
-            ensure!(nonempty(&args["job_id"]), "Provide job_id");
-            name
-        }
         _ => name,
     };
     Ok((command.into(), Value::Object(args)))
-}
-
-fn nonempty(value: &Value) -> bool {
-    value.as_str().is_some_and(|s| !s.trim().is_empty())
-}
-
-fn select_identifier(args: &mut Map<String, Value>, first: &str, second: &str) -> Result<()> {
-    ensure!(
-        nonempty(&args[first]) ^ nonempty(&args[second]),
-        "Provide exactly one of {first} and {second}"
-    );
-    let unused = if nonempty(&args[first]) {
-        second
-    } else {
-        first
-    };
-    args.remove(unused);
-    Ok(())
-}
-
-async fn rodin_images(args: &Map<String, Value>) -> Result<Value> {
-    let paths = args["input_image_paths"].as_array();
-    let urls = args["input_image_urls"].as_array();
-    ensure!(
-        paths.is_some() ^ urls.is_some(),
-        "Provide exactly one of input_image_paths and input_image_urls"
-    );
-    let mut images = Vec::new();
-    let mut encoded_bytes = 0;
-    if let Some(paths) = paths {
-        for path in paths {
-            let path = Path::new(path.as_str().context("Image path must be a string")?);
-            ensure!(path.is_absolute(), "Image paths must be absolute");
-            let file = tokio::fs::File::open(path)
-                .await
-                .with_context(|| format!("Cannot open image {}", path.display()))?;
-            ensure!(
-                file.metadata().await?.is_file(),
-                "Image path must be a regular file"
-            );
-            let mut data = Vec::new();
-            file.take(16 * 1024 * 1024 + 1)
-                .read_to_end(&mut data)
-                .await?;
-            ensure!(
-                !data.is_empty() && data.len() <= 16 * 1024 * 1024,
-                "Images must contain between 1 byte and 16 MiB"
-            );
-            let extension = path
-                .extension()
-                .and_then(|s| s.to_str())
-                .context("Image path needs a file extension")?;
-            encoded_bytes += data.len().div_ceil(3) * 4 + extension.len() + 10;
-            ensure!(
-                encoded_bytes <= MAX_MESSAGE_BYTES,
-                "Combined images exceed the 32 MiB command limit"
-            );
-            images.push(json!([
-                format!(".{extension}"),
-                BASE64_STANDARD.encode(data)
-            ]));
-        }
-    }
-    if let Some(urls) = urls {
-        for value in urls {
-            let url = url::Url::parse(value.as_str().context("Image URL must be a string")?)
-                .context("Invalid image URL")?;
-            ensure!(
-                matches!(url.scheme(), "https" | "http") && url.host_str().is_some(),
-                "Image URLs must use HTTP or HTTPS"
-            );
-            images.push(value.clone());
-        }
-    }
-    ensure!(!images.is_empty(), "Provide at least one image");
-    Ok(Value::Array(images))
-}
-
-fn process_bbox(value: &Value) -> Result<Value> {
-    if value.is_null() {
-        return Ok(Value::Null);
-    }
-    let values = value
-        .as_array()
-        .context("bbox_condition must be an array")?;
-    ensure!(values.len() == 3, "bbox_condition needs three dimensions");
-    let numbers = values
-        .iter()
-        .map(|v| {
-            v.as_f64()
-                .filter(|n| n.is_finite() && *n > 0.0)
-                .context("bbox_condition dimensions must be positive")
-        })
-        .collect::<Result<Vec<_>>>()?;
-    if values.iter().all(Value::is_u64) {
-        return Ok(value.clone());
-    }
-    let maximum = numbers.iter().copied().fold(0.0, f64::max);
-    Ok(json!(
-        numbers
-            .iter()
-            .map(|n| ((n / maximum * 100.0) as u64).max(1))
-            .collect::<Vec<_>>()
-    ))
-}
-
-fn polypizza_id(value: &Value, licence: bool) -> Result<Value> {
-    if value.is_null() || value == "" {
-        return Ok(Value::Null);
-    }
-    let maximum = if licence { 1 } else { 11 };
-    if let Some(number) = value
-        .as_i64()
-        .or_else(|| value.as_str()?.trim().parse().ok())
-    {
-        ensure!(
-            (0..=maximum).contains(&number),
-            "Poly Pizza filter ID must be between 0 and {maximum}"
-        );
-        return Ok(json!(number));
-    }
-    let text = value
-        .as_str()
-        .context("Poly Pizza filter must be a name or integer ID")?;
-    let normalized: String = text
-        .to_lowercase()
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .collect();
-    if licence {
-        if normalized.starts_with("ccby") {
-            return Ok(json!(0));
-        }
-        if normalized.starts_with("cc0") || normalized == "publicdomain" {
-            return Ok(json!(1));
-        }
-    } else {
-        let categories: HashMap<String, u8> =
-            serde_json::from_str(include_str!("../resources/polypizza_categories.json"))?;
-        if let Some(id) = categories.get(&normalized) {
-            return Ok(json!(id));
-        }
-    }
-    bail!(
-        "Unknown Poly Pizza {}: {text}",
-        if licence { "licence" } else { "category" }
-    );
 }
 
 pub async fn execute(
@@ -274,18 +72,6 @@ pub async fn execute(
 ) -> Result<CallToolResult> {
     let (command, params) = prepare(name, args).await?;
     let mut result = connection.send(&command, params).await?;
-    if matches!(
-        command.as_str(),
-        "create_hunyuan_job" | "poll_hunyuan_job_status"
-    ) && let Some(error) = result["Response"]
-        .get("Error")
-        .filter(|error| !error.is_null())
-    {
-        bail!(
-            "Hunyuan3D: {error}; request ID: {}",
-            result["Response"]["RequestId"]
-        );
-    }
     if name == "get_viewport_screenshot" || name == "get_sketchfab_model_preview" {
         let data = result["image_data"].as_str().context(
             "Add-on did not return image data; run blender-mcp install-addon and restart Blender",
@@ -317,14 +103,6 @@ pub async fn execute(
         result["after_install"] =
             json!("Restart Blender or disable and enable the add-on, then Start MCP Server");
     }
-    if command == "create_rodin_job" && result.get("submit_time").is_some() {
-        result = json!({"task_uuid":result["uuid"], "subscription_key":result["jobs"]["subscription_key"]});
-    }
-    if command == "create_hunyuan_job"
-        && let Some(id) = result["Response"]["JobId"].as_str()
-    {
-        result = json!({"job_id":format!("job_{id}")});
-    }
     Ok(CallToolResult::success(vec![ContentBlock::text(
         serde_json::to_string_pretty(&result)?,
     )]))
@@ -345,7 +123,7 @@ mod tests {
     #[test]
     fn catalog_preserves_tools_without_collection_parameters() {
         let tools = definitions().unwrap();
-        assert_eq!(tools.len(), 26);
+        assert_eq!(tools.len(), 9);
         for definition in tools {
             assert!(!definition.tool.name.contains("telemetry"));
             assert!(!definition.tool.name.contains("trajectory"));
@@ -398,90 +176,5 @@ mod tests {
             params,
             json!({"uid":"model","normalize_size":true,"target_size":1.7})
         );
-        let (_, params) = prepare(
-            "search_polypizza_models",
-            args(
-                "search_polypizza_models",
-                json!({"category":"Animals", "licence":"CC0"}),
-            )
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(params["category"], 7);
-        assert_eq!(params["licence"], 1);
-        assert!(
-            prepare(
-                "search_polypizza_models",
-                args("search_polypizza_models", json!({})).unwrap(),
-            )
-            .await
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn filter_names_aliases_and_invalid_ids() {
-        for (name, expected) in [
-            ("furniture & decor", 4),
-            ("buildings/architecture", 8),
-            ("person", 9),
-            ("plants", 6),
-            ("3", 3),
-        ] {
-            assert_eq!(polypizza_id(&json!(name), false).unwrap(), expected);
-        }
-        assert_eq!(polypizza_id(&json!("CC-BY 3.0"), true).unwrap(), 0);
-        assert_eq!(polypizza_id(&json!("Public Domain"), true).unwrap(), 1);
-        for value in [json!(true), json!(-1), json!(12), json!("spaceships")] {
-            assert!(polypizza_id(&value, false).is_err());
-        }
-        for value in [json!(true), json!(2), json!("GPL")] {
-            assert!(polypizza_id(&value, true).is_err());
-        }
-    }
-
-    #[test]
-    fn bounding_boxes_remain_positive() {
-        assert_eq!(process_bbox(&json!([1, 2, 3])).unwrap(), json!([1, 2, 3]));
-        assert_eq!(
-            process_bbox(&json!([0.001, 1.0, 2.0])).unwrap(),
-            json!([1, 50, 100])
-        );
-        for value in [
-            json!([0, 1, 1]),
-            json!([-1, 1, 1]),
-            json!([]),
-            json!([1, 2]),
-        ] {
-            assert!(process_bbox(&value).is_err());
-        }
-    }
-
-    #[tokio::test]
-    async fn rodin_url_inputs_work_and_conflicts_fail() {
-        let name = "generate_hyper3d_model_via_images";
-        let (_, params) = prepare(
-            name,
-            args(
-                name,
-                json!({"input_image_urls":["https://example.com/image.png"]}),
-            )
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            params,
-            json!({"text_prompt":null,"images":["https://example.com/image.png"],"bbox_condition":null})
-        );
-        for value in [
-            json!({}),
-            json!({"input_image_urls":[]}),
-            json!({"input_image_urls":["file:///tmp/a"]}),
-            json!({"input_image_paths":[],"input_image_urls":[]}),
-        ] {
-            assert!(prepare(name, args(name, value).unwrap()).await.is_err());
-        }
     }
 }

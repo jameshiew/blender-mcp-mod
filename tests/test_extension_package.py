@@ -21,7 +21,7 @@ from conftest import (
     ROOT_ADDON,
     blender_environment,
 )
-from test_hunyuan_import_security import _install_bpy_stubs, _load_addon
+from extension_stub import _install_bpy_stubs, _load_addon
 
 
 def test_package_metadata_and_wheels(addon_package):
@@ -66,6 +66,11 @@ def test_package_metadata_and_wheels(addon_package):
             "UserEditRecorder",
             "uuid.getnode",
             "drain_human_activity",
+            "polyhaven",
+            "hyper3d",
+            "polypizza",
+            "hunyuan",
+            "bit.ly",
         ):
             assert removed not in archive.read("__init__.py").decode()
         assert set(archive.namelist()) == {
@@ -118,14 +123,13 @@ def test_running_extension_keeps_loaded_version(unpacked_addon, tmp_path, monkey
     assert info["protocol_version"] == PROTOCOL_VERSION
 
 
-@pytest.mark.parametrize("method", ["get", "post"])
-def test_http_respects_online_access(monkeypatch, method):
+def test_http_respects_online_access(monkeypatch):
     addon, bpy = _load_addon(monkeypatch)
     calls = []
     monkeypatch.setattr(
-        addon.requests, method, lambda *a, **kw: calls.append((a, kw)), raising=False
+        addon.requests, "get", lambda *a, **kw: calls.append((a, kw)), raising=False
     )
-    request = getattr(addon, "_http_" + method)
+    request = addon._http_get
     bpy.app.online_access = False
     with pytest.raises(RuntimeError, match="Online access is disabled"):
         request("https://example.invalid")
@@ -237,52 +241,6 @@ except RuntimeError as error:
     assert "Online access is disabled" in str(error)
 else:
     raise AssertionError("Offline request was allowed")
-
-server = addon.BlenderMCPServer()
-for map_type in ("arm", "color"):
-    image = bpy.data.images.new("test_" + map_type, width=1, height=1)
-    image.filepath_raw = str(Path({str(tmp_path)!r}) / (image.name + ".png"))
-    image.file_format = "PNG"
-    image.save()
-result = server.set_texture("Cube", "test")
-assert result.get("success"), result
-nodes = bpy.data.objects["Cube"].active_material.node_tree.nodes
-separate = next(node for node in nodes if node.bl_idname == "ShaderNodeSeparateColor")
-assert separate.mode == "RGB"
-assert separate.inputs["Color"].links[0].from_node.image.name == "test_arm"
-for channel, target in (("Green", "Roughness"), ("Blue", "Metallic")):
-    assert separate.outputs[channel].links[0].to_socket.name == target
-assert separate.outputs["Red"].links[0].to_node.blend_type == "MULTIPLY"
-
-obj_data = b"o Triangle\\nv 0 0 0\\nv 1 0 0\\nv 0 1 0\\nf 1 2 3\\n"
-archive = io.BytesIO()
-with zipfile.ZipFile(archive, "w") as zipped:
-    zipped.writestr("model.obj", obj_data)
-files = {{"obj": {{"1k": {{"obj": {{"url": "https://example.invalid/model.obj"}}}}}}}}
-
-def fake_get(url, **kwargs):
-    content = archive.getvalue() if url.endswith(".zip") else obj_data
-    return SimpleNamespace(
-        status_code=200,
-        content=content,
-        json=lambda: files,
-        raise_for_status=lambda: None,
-        iter_content=lambda chunk_size: [content],
-    )
-
-original_get = addon._http_get
-addon._http_get = fake_get
-try:
-    result = server.download_polyhaven_asset("test", "models", file_format="obj")
-    assert result.get("success"), result
-    assert result["imported_objects"], result
-    result = server.import_generated_asset_hunyuan_ai("Hunyuan", "https://example.invalid/model.zip")
-    assert result.get("succeed"), result
-    assert result["name"] == "Hunyuan", result
-    for obj in bpy.context.selected_objects:
-        assert len(obj.data.polygons) == 1
-finally:
-    addon._http_get = original_get
 
 addon_utils.disable(name, default_set=True)
 assert not hasattr(bpy.types.Scene, "blendermcp_port")
