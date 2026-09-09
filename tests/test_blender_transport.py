@@ -130,6 +130,29 @@ bpy.app.timers.register(finish)
             assert (
                 state["version"] in json.loads(result["content"][0]["text"])["result"]
             )
+            for code, params, expected in [
+                (
+                    "import math\nobj = bpy.data.objects.new('Namespace test', None)\ndef helper():\n    return math.sqrt(16), obj.name",
+                    {"namespace": "task-a"},
+                    "",
+                ),
+                ("obj = 'other task'", {"namespace": "task-b"}, ""),
+                (
+                    "print(helper())",
+                    {"namespace": "task-a"},
+                    "(4.0, 'Namespace test')\n",
+                ),
+                ("print('obj' in globals())", {}, "False\n"),
+                (
+                    "print('obj' in globals())",
+                    {"namespace": "task-a", "reset_namespace": True},
+                    "False\n",
+                ),
+                ("print(obj)", {"namespace": "task-b"}, "other task\n"),
+            ]:
+                result = client.call("execute_blender_code", {"code": code, **params})
+                assert not result.get("isError"), result
+                assert json.loads(result["content"][0]["text"])["result"] == expected
             print(
                 f"Native Blender {state['version']}: rejected plaintext and missing certificate; Rust MCP executed unrestricted Python over TLS"
             )

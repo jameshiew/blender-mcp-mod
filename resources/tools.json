@@ -54,12 +54,20 @@
   },
   {
     "name": "execute_blender_code",
-    "description": "Execute arbitrary Python code in Blender. Make sure to do it step-by-step by breaking it into smaller chunks.\n\nParameters:\n- code: The Python code to execute",
+    "description": "Execute Python code in Blender in small steps. Without namespace, each call uses fresh Python globals. For persistence, choose a unique namespace ID for the task and reuse it across calls. Imports, variables, and functions persist until reset or add-on server restart, including changes made before an error. Different IDs separate Python globals only; all calls still share Blender data and imported modules. Anyone using the same ID shares its globals.\n\nParameters:\n- code: The Python code to execute\n- namespace: Optional task-specific ID for persistent Python globals\n- reset_namespace: Clear the named namespace before executing code; requires namespace. Use empty code to release stored variables when finished.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "code": {
           "type": "string"
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "reset_namespace": {
+          "type": "boolean"
         }
       },
       "required": [

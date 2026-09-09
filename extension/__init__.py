@@ -68,6 +68,7 @@ class BlenderMCPServer:
         # Live client sockets, so stop() can unblock threads parked in recv().
         self._clients = set()
         self._clients_lock = threading.Lock()
+        self._execution_namespaces = {}
 
     def _load_tls_context(self):
         directory = self.config_dir
@@ -656,17 +657,29 @@ class BlenderMCPServer:
         except Exception as e:
             return {"error": str(e)}
 
-    def execute_code(self, code):
+    def execute_code(self, code, namespace=None, reset_namespace=False):
         """Execute arbitrary Blender Python code"""
         # This is powerful but potentially dangerous - use with caution
         try:
-            # Create a local namespace for execution
-            namespace = {"bpy": bpy}
+            if namespace is not None and (
+                not isinstance(namespace, str) or not 1 <= len(namespace) <= 128
+            ):
+                raise ValueError("namespace must be a string of 1 to 128 characters")
+            if reset_namespace and namespace is None:
+                raise ValueError("reset_namespace requires a namespace")
+            if namespace is None:
+                execution_namespace = {"bpy": bpy}
+            else:
+                if reset_namespace:
+                    self._execution_namespaces.pop(namespace, None)
+                execution_namespace = self._execution_namespaces.setdefault(
+                    namespace, {"bpy": bpy}
+                )
 
             # Capture stdout during execution, and return it as result
             capture_buffer = io.StringIO()
             with redirect_stdout(capture_buffer):
-                exec(code, namespace)
+                exec(code, execution_namespace)
 
             captured_output = capture_buffer.getvalue()
             return {"executed": True, "result": captured_output}

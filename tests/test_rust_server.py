@@ -104,7 +104,7 @@ class Client:
         name, params = command["type"], command["params"]
         if name == "execute_code":
             try:
-                result = self.executor.execute_code(params["code"])
+                result = self.executor.execute_code(**params)
             except Exception as error:
                 logger.exception("Blender rejected test script")
                 return {"status": "error", "message": str(error)}
@@ -251,6 +251,31 @@ def test_errors_are_visible_and_server_remains_usable(client):
         "get_scene_info", {"user_prompt": "must not be forwarded"}
     ).get("isError")
     assert client.commands[-1]["params"] == {}
+
+
+def test_persistent_namespaces_over_stdio_and_tcp(client):
+    def run(code, **params):
+        result = client.call("execute_blender_code", {"code": code, **params})
+        assert not result.get("isError"), result
+        return json.loads(result["content"][0]["text"])["result"]
+
+    run("value = 4\ndef helper():\n    return value", namespace="task-a")
+    run("value = 8", namespace="task-b")
+    assert run("print(helper())", namespace="task-a") == "4\n"
+    assert run("print(value)", namespace="task-b") == "8\n"
+    assert run("print('value' in globals())") == "False\n"
+    run("", namespace="task-a", reset_namespace=True)
+    assert run("print('helper' in globals())", namespace="task-a") == "False\n"
+    assert run("print(value)", namespace="task-b") == "8\n"
+
+    count = len(client.commands)
+    for params in [
+        {"namespace": ""},
+        {"namespace": "a" * 129},
+        {"reset_namespace": "yes"},
+    ]:
+        assert client.call("execute_blender_code", {"code": "", **params})["isError"]
+    assert len(client.commands) == count
 
 
 def test_binary_contains_addon(unpacked_addon):
