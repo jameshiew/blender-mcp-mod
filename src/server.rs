@@ -26,7 +26,7 @@ impl ServerHandler for BlenderServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().enable_prompts().build())
             .with_server_info(Implementation::new("blender-mcp", env!("CARGO_PKG_VERSION")))
-            .with_instructions("Control Blender through its MCP add-on. Check get_addon_status when connecting. Use viewport screenshots to verify changes. Credit CC-BY assets using the returned attribution. Tool results contain the add-on's JSON data.")
+            .with_instructions("Control Blender through its MCP extension. Start with get_addon_status and get_scene_info; follow next_offset when more objects are needed. Inspect exact object names before editing. Use execute_blender_code for modeling, materials, and scene operations, and Sketchfab when external assets suit the task. Batch related edits, print concise results, and verify visible changes with get_viewport_screenshot. Errors and timeouts can leave partial changes: inspect before retrying. Credit assets using returned attribution. JSON results are available as structuredContent and text; image tools also return capture metadata.")
     }
 
     async fn list_tools(

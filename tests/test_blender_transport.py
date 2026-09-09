@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import socket
@@ -153,9 +154,115 @@ bpy.app.timers.register(finish)
                 result = client.call("execute_blender_code", {"code": code, **params})
                 assert not result.get("isError"), result
                 assert json.loads(result["content"][0]["text"])["result"] == expected
-            print(
-                f"Native Blender {state['version']}: rejected plaintext and missing certificate; Rust MCP executed unrestricted Python over TLS"
+
+            def call(name, arguments):
+                result = client.call(name, arguments)
+                assert not result.get("isError"), result
+                return result["structuredContent"]
+
+            call(
+                "execute_blender_code",
+                {
+                    "code": """for obj in bpy.context.selected_objects:
+    obj.select_set(False)
+for index in reversed(range(25)):
+    obj = bpy.data.objects.new(f'Inspect.{index:03}', None)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.select_set(index % 2 == 0)
+bpy.context.view_layer.objects.active = bpy.data.objects['Inspect.000']
+parent = bpy.data.objects['Inspect.000']
+parent.location = (10, 20, 30)
+bpy.ops.mesh.primitive_cube_add(size=2)
+child = bpy.context.object
+child.name = 'Inspect.Child'
+child.parent = parent
+child.location = (1, 2, 3)
+child.modifiers.new('Bevel', 'BEVEL')
+bpy.context.view_layer.update()
+"""
+                },
             )
+            first = call(
+                "get_scene_info",
+                {"name_filter": "inspect.", "object_type": "EMPTY", "limit": 20},
+            )
+            assert first["matching_objects"] == 25
+            assert first["returned_count"] == 20
+            assert first["next_offset"] == 20
+            assert first["active_object"] == "Inspect.Child"
+            assert first["mode"] == "OBJECT"
+            assert first["filepath"] == ""
+            last = call(
+                "get_scene_info",
+                {
+                    "name_filter": "INSPECT.",
+                    "object_type": "EMPTY",
+                    "offset": first["next_offset"],
+                },
+            )
+            names = [obj["name"] for obj in first["objects"] + last["objects"]]
+            assert names == [f"Inspect.{index:03}" for index in range(25)]
+            assert last["next_offset"] is None
+            selected = call(
+                "get_scene_info",
+                {"selected_only": True, "name_filter": "Inspect.Child"},
+            )
+            assert [obj["name"] for obj in selected["objects"]] == ["Inspect.Child"]
+            child = call("get_object_info", {"object_name": "Inspect.Child"})
+            assert child["parent"] == "Inspect.000"
+            assert child["location"] == [1, 2, 3]
+            assert child["world_location"] == [11, 22, 33]
+            assert child["dimensions"] == [2, 2, 2]
+            assert child["mesh"] == {"vertices": 8, "edges": 12, "polygons": 6}
+            assert child["modifiers"][0]["type"] == "BEVEL"
+
+            failed = client.call(
+                "execute_blender_code",
+                {
+                    "code": "import sys\nprint('partial change')\nprint('diagnostic warning', file=sys.stderr)\nbpy.data.objects['Inspect.Child'].location.x = 4\nraise ValueError('native diagnostic')"
+                },
+            )
+            assert failed["isError"]
+            message = failed["content"][0]["text"]
+            assert 'File "<blender-mcp>", line 5' in message
+            assert "ValueError: native diagnostic" in message
+            assert "partial change\n" in message
+            assert "diagnostic warning\n" in message
+            assert (
+                call("get_object_info", {"object_name": "Inspect.Child"})["location"][0]
+                == 4
+            )
+            output = call(
+                "execute_blender_code",
+                {
+                    "code": "import sys\nprint('x' * 20000)\nprint('warning', file=sys.stderr)"
+                },
+            )
+            assert output["output_truncated"] is True
+            assert len(output["result"]) == 16_384
+            assert output["stderr"] == "warning\n"
+
+            screenshot = client.call("get_viewport_screenshot", {"max_size": 256})
+            assert not screenshot.get("isError"), screenshot
+            assert screenshot["content"][0]["type"] == "image"
+            assert screenshot["structuredContent"]["method"] in {
+                "offscreen",
+                "window_grab",
+            }
+            assert (
+                max(
+                    screenshot["structuredContent"]["width"],
+                    screenshot["structuredContent"]["height"],
+                )
+                <= 256
+            )
+            image = base64.b64decode(screenshot["content"][0]["data"])
+            assert image.startswith(b"\x89PNG\r\n\x1a\n")
+            (tmp_path / "viewport.png").write_bytes(image)
+            print(
+                f"Native Blender {state['version']}: TLS authentication, Python namespaces/diagnostics, scene pagination, world transforms, and viewport capture passed"
+            )
+            print(f"Viewport capture: {tmp_path / 'viewport.png'}")
         finally:
             if client is not None:
                 client.close()

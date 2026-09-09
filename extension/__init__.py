@@ -448,36 +448,91 @@ class BlenderMCPServer:
             "blender_version": bpy.app.version_string,
         }
 
-    def get_scene_info(self):
+    def get_scene_info(
+        self,
+        offset=0,
+        limit=20,
+        name_filter=None,
+        object_type=None,
+        selected_only=False,
+    ):
         """Get information about the current Blender scene"""
         try:
-            print("Getting scene info...")
-            # Simplify the scene info to reduce data size
+            if type(offset) is not int or offset < 0:
+                raise ValueError("offset must be a non-negative integer")
+            if type(limit) is not int or not 1 <= limit <= 100:
+                raise ValueError("limit must be an integer between 1 and 100")
+            if name_filter is not None and not isinstance(name_filter, str):
+                raise ValueError("name_filter must be a string or null")
+            if object_type is not None and (
+                not isinstance(object_type, str) or not object_type.isupper()
+            ):
+                raise ValueError(
+                    "object_type must be an uppercase Blender object type or null"
+                )
+            if type(selected_only) is not bool:
+                raise ValueError("selected_only must be a boolean")
+            if object_type is not None and object_type not in {
+                item.identifier
+                for item in bpy.types.Object.bl_rna.properties["type"].enum_items
+            }:
+                raise ValueError(f"Unsupported object_type: {object_type}")
+
+            scene = bpy.context.scene
+            name_filter = name_filter.casefold() if name_filter is not None else None
+            matching_objects = sorted(
+                (
+                    obj
+                    for obj in scene.objects
+                    if (name_filter is None or name_filter in obj.name.casefold())
+                    and (object_type is None or obj.type == object_type)
+                    and (not selected_only or obj.select_get())
+                ),
+                key=lambda obj: obj.name,
+            )
+            page = matching_objects[offset : offset + limit]
+            next_offset = offset + len(page)
+            if next_offset >= len(matching_objects):
+                next_offset = None
+            active_object = bpy.context.active_object
             scene_info = {
-                "name": bpy.context.scene.name,
-                "object_count": len(bpy.context.scene.objects),
+                "name": scene.name,
+                "object_count": len(scene.objects),
                 "objects": [],
                 "materials_count": len(bpy.data.materials),
+                "matching_objects": len(matching_objects),
+                "returned_count": len(page),
+                "offset": offset,
+                "limit": limit,
+                "next_offset": next_offset,
+                "truncated": next_offset is not None,
+                "active_object": active_object.name if active_object else None,
+                "mode": bpy.context.mode,
+                "camera": scene.camera.name if scene.camera else None,
+                "frame": scene.frame_current,
+                "render_engine": scene.render.engine,
+                "unit_settings": {
+                    "system": scene.unit_settings.system,
+                    "scale_length": scene.unit_settings.scale_length,
+                },
+                "filepath": bpy.data.filepath,
             }
 
-            # Collect minimal object information (limit to first 10 objects)
-            for i, obj in enumerate(bpy.context.scene.objects):
-                if i >= 10:  # Reduced from 20 to 10
-                    break
-
+            for obj in page:
                 obj_info = {
                     "name": obj.name,
                     "type": obj.type,
-                    # Only include basic location data
                     "location": [
                         round(float(obj.location.x), 2),
                         round(float(obj.location.y), 2),
                         round(float(obj.location.z), 2),
                     ],
+                    "dimensions": [float(value) for value in obj.dimensions],
+                    "selected": obj.select_get(),
+                    "visible": obj.visible_get(),
                 }
                 scene_info["objects"].append(obj_info)
 
-            print(f"Scene info collected: {len(scene_info['objects'])} objects")
             return scene_info
         except Exception as e:
             print(f"Error in get_scene_info: {str(e)}")
@@ -498,6 +553,8 @@ class BlenderMCPServer:
 
     def get_object_info(self, name):
         """Get detailed information about a specific object"""
+        if not isinstance(name, str) or not name:
+            raise ValueError("name must be a non-empty string")
         obj = bpy.data.objects.get(name)
         if not obj:
             raise ValueError(f"Object not found: {name}")
@@ -513,6 +570,22 @@ class BlenderMCPServer:
                 obj.rotation_euler.z,
             ],
             "scale": [obj.scale.x, obj.scale.y, obj.scale.z],
+            "dimensions": [float(value) for value in obj.dimensions],
+            "rotation_mode": obj.rotation_mode,
+            "matrix_world": [list(row) for row in obj.matrix_world],
+            "world_location": list(obj.matrix_world.translation),
+            "parent": obj.parent.name if obj.parent else None,
+            "collections": [collection.name for collection in obj.users_collection],
+            "modifiers": [
+                {
+                    "name": modifier.name,
+                    "type": modifier.type,
+                    "show_viewport": modifier.show_viewport,
+                    "show_render": modifier.show_render,
+                }
+                for modifier in obj.modifiers
+            ],
+            "selected": obj.select_get(),
             "visible": obj.visible_get(),
             "materials": [],
         }
@@ -659,32 +732,76 @@ class BlenderMCPServer:
 
     def execute_code(self, code, namespace=None, reset_namespace=False):
         """Execute arbitrary Blender Python code"""
-        # This is powerful but potentially dangerous - use with caution
+        from contextlib import redirect_stderr
+
+        class BoundedOutput(io.TextIOBase):
+            def __init__(self):
+                self._buffer = io.StringIO()
+                self.remaining = 16_384
+                self.truncated = False
+
+            def writable(self):
+                return True
+
+            def write(self, text):
+                if not isinstance(text, str):
+                    raise TypeError("write() argument must be str")
+                retained = text[: self.remaining]
+                self._buffer.write(retained)
+                self.remaining -= len(retained)
+                self.truncated |= len(retained) < len(text)
+                return len(text)
+
+            def getvalue(self):
+                return self._buffer.getvalue()
+
+        if namespace is not None and (
+            not isinstance(namespace, str) or not 1 <= len(namespace) <= 128
+        ):
+            raise Exception(
+                "Code execution error: namespace must be a string of 1 to 128 characters"
+            )
+        if reset_namespace and namespace is None:
+            raise Exception(
+                "Code execution error: reset_namespace requires a namespace"
+            )
+        if namespace is None:
+            execution_namespace = {"bpy": bpy}
+        else:
+            if reset_namespace:
+                self._execution_namespaces.pop(namespace, None)
+            execution_namespace = self._execution_namespaces.setdefault(
+                namespace, {"bpy": bpy}
+            )
+
+        stdout = BoundedOutput()
+        stderr = BoundedOutput()
         try:
-            if namespace is not None and (
-                not isinstance(namespace, str) or not 1 <= len(namespace) <= 128
-            ):
-                raise ValueError("namespace must be a string of 1 to 128 characters")
-            if reset_namespace and namespace is None:
-                raise ValueError("reset_namespace requires a namespace")
-            if namespace is None:
-                execution_namespace = {"bpy": bpy}
-            else:
-                if reset_namespace:
-                    self._execution_namespaces.pop(namespace, None)
-                execution_namespace = self._execution_namespaces.setdefault(
-                    namespace, {"bpy": bpy}
-                )
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exec(compile(code, "<blender-mcp>", "exec"), execution_namespace)
 
-            # Capture stdout during execution, and return it as result
-            capture_buffer = io.StringIO()
-            with redirect_stdout(capture_buffer):
-                exec(code, execution_namespace)
-
-            captured_output = capture_buffer.getvalue()
-            return {"executed": True, "result": captured_output}
+            result = {"executed": True, "result": stdout.getvalue()}
+            if stderr.getvalue():
+                result["stderr"] = stderr.getvalue()
+            if stdout.truncated or stderr.truncated:
+                result["output_truncated"] = True
+            return result
         except Exception as e:
-            raise Exception(f"Code execution error: {str(e)}")
+            diagnostic = BoundedOutput()
+            diagnostic.write(f"{type(e).__name__}\n")
+            traceback.print_exception(
+                type(e), e, e.__traceback__, limit=-8, file=diagnostic, chain=False
+            )
+            message = f"Code execution error: {str(e)[:2048]}\n{diagnostic.getvalue()}"
+            if diagnostic.truncated:
+                message += "\n[Traceback truncated]"
+            for label, output in (("stdout", stdout), ("stderr", stderr)):
+                if output.getvalue():
+                    message += f"\n{label}:\n{output.getvalue()}"
+                if output.truncated:
+                    message += f"\n[{label} truncated after 16384 characters]"
+            message += "\nChanges made before the error were not rolled back."
+            raise Exception(message) from e
 
     def get_sketchfab_status(self):
         """Get the current status of Sketchfab integration"""

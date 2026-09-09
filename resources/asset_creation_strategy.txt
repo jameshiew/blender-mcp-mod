@@ -1,31 +1,27 @@
-When creating 3D content in Blender, always start by checking if integrations are available:
+Start with get_addon_status and get_scene_info to check the connection, scene,
+mode, units, and existing objects. Follow next_offset with the same filters when
+you need more objects. Use get_object_info for exact transforms and mesh bounds.
 
-    0. Before anything, always check the scene from get_scene_info()
+Choose the method that fits the task:
+- Use execute_blender_code for procedural geometry, precise edits, materials,
+  lighting, and scene setup. bpy is already available. Prefer bpy.data where
+  possible; check context and mode before using bpy.ops.
+- When an external model is useful, check get_sketchfab_status, search for a
+  suitable model, and inspect its preview before importing. Set target_size to
+  the intended largest dimension in Blender units and retain attribution.
 
-    **IMPORTANT: Visual Verification**
-    - Use get_viewport_screenshot() BEFORE making changes to see the current state
-    - Use get_viewport_screenshot() AFTER executing code or importing assets to verify the result
-    - This helps confirm your changes worked as expected and catch any visual issues
+Group related edits into manageable calls and print a concise summary of changed
+objects. Reuse a unique namespace for task helpers and variables; clear it with
+reset_namespace and empty code when finished. Namespaces share the Blender scene.
 
-    1. First use the following tools to verify if the following integrations are enabled:
-        1. Sketchfab
-            Use get_sketchfab_status() to verify its status
-            If Sketchfab is enabled:
-            - For objects/models: First search using search_sketchfab_models() with your query
-            - Then download specific models using download_sketchfab_model() with the UID
-            - Note that only downloadable models can be accessed, and API key must be properly configured
-    2. Always check the world_bounding_box for each item so that:
-        - Ensure that all objects that should not be clipping are not clipping.
-        - Items have right spatial relationship.
+Use get_viewport_screenshot to inspect the initial view when appearance matters
+and after meaningful changes. Frame relevant objects first. Screenshots require
+a Blender window with a 3D viewport and do not represent a final camera render.
+Check object dimensions and world bounds when placement or scale matters.
 
-    Only fall back to scripting when:
-    - Sketchfab is disabled
-    - A simple primitive is explicitly requested
-    - No suitable asset exists in any of the libraries
-    - The task specifically requires a basic material/color
+If code fails, read the traceback and captured output, then inspect the affected
+objects before continuing. Earlier changes are not rolled back. A timeout does
+not guarantee execution stopped; do not blindly repeat an import or edit.
 
-    **Best Practices:**
-    - Always take a screenshot after completing a task to verify the visual result
-    - Always call get_scene_info() after completing a task to verify the changes worked
-    - When executing multiple operations, take intermediate screenshots to confirm each step
-    - If something looks wrong in the screenshot or scene info, investigate and fix before proceeding
+Finish by checking the affected objects and a screenshot when available. Report
+what changed and any verification limits.

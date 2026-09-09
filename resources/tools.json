@@ -1,7 +1,8 @@
 [
   {
     "name": "get_addon_status",
-    "description": "Check the connected Blender add-on version and capabilities. Update with blender-mcp install-addon, then restart Blender.",
+    "description": "Check the connected Blender version, add-on version, and capabilities before starting a task. If up_to_date is false, follow update_command and after_install.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -11,22 +12,51 @@
   },
   {
     "name": "get_scene_info",
-    "description": "Get detailed information about the current Blender scene",
+    "description": "Inspect the active scene, mode, selection, camera, units, and a page of objects sorted by name. Defaults to 20 objects; use next_offset with the same filters to continue until null. Filters combine with AND. Pages reflect live scene state: restart at offset 0 after adding, removing, or renaming objects. Use get_object_info for full transforms, bounds, and modifiers.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Start index within matching objects (default 0)."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum objects per page (default 20)."
+        },
+        "name_filter": {
+          "type": "string",
+          "description": "Case-insensitive substring of the object name. Omit for all names."
+        },
+        "object_type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Blender object type in uppercase, for example MESH, CURVE, EMPTY, CAMERA, or LIGHT."
+        },
+        "selected_only": {
+          "type": "boolean",
+          "description": "Only selected objects in the active view layer (default false)."
+        }
+      },
       "required": [],
       "additionalProperties": false
     }
   },
   {
     "name": "get_object_info",
-    "description": "Get detailed information about a specific object in the Blender scene.\n\nParameters:\n- object_name: The name of the object to get information about",
+    "description": "Inspect an object by exact name: local transforms, world matrix and location, dimensions, parent, collections, modifiers, visibility, materials, and mesh counts/bounds. Local location and Euler rotation (radians) are relative to the parent; use matrix_world for the full world transform. Mesh counts describe the base mesh. Bounds and dimensions use Blender's current cached object bounds and may reflect modifiers; instances are not enumerated.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
         "object_name": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact object name returned by scene inspection or code execution."
         }
       },
       "required": [
@@ -37,12 +67,14 @@
   },
   {
     "name": "get_viewport_screenshot",
-    "description": "Capture a screenshot of the current Blender 3D viewport.\n\nParameters:\n- max_size: Maximum size in pixels for the largest dimension (default: 1000)\n\nReturns the screenshot as an Image.",
+    "description": "Capture the current 3D viewport as an image with dimensions and capture method. Requires a Blender window with a 3D viewport; unavailable in background mode. Use to verify visible results after a meaningful batch of changes. This shows the current view, not a final camera render; frame the relevant objects first if needed.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
         "max_size": {
           "type": "integer",
+          "description": "Maximum pixel size of the largest image dimension.",
           "default": 1000,
           "minimum": 1,
           "maximum": 4096
@@ -54,31 +86,41 @@
   },
   {
     "name": "execute_blender_code",
-    "description": "Execute Python code in Blender in small steps. Without namespace, each call uses fresh Python globals. For persistence, choose a unique namespace ID for the task and reuse it across calls. Imports, variables, and functions persist until reset or add-on server restart, including changes made before an error. Different IDs separate Python globals only; all calls still share Blender data and imported modules. Anyone using the same ID shares its globals.\n\nParameters:\n- code: The Python code to execute\n- namespace: Optional task-specific ID for persistent Python globals\n- reset_namespace: Clear the named namespace before executing code; requires namespace. Use empty code to release stored variables when finished.",
+    "description": "Execute Python on Blender's main thread with bpy already available. Prefer bpy.data for edits; bpy.ops may require a specific mode, selection, or context override. Print concise results: expressions are not returned automatically. Python stdout/stderr are limited to 16,384 characters each and truncation is reported. Errors include script traceback and output; earlier changes are not rolled back. A timeout does not cancel execution: inspect before retrying. Without namespace, globals are fresh each call. Reusing a task-specific namespace preserves imports, variables, and helpers until reset or server restart. Namespaces separate globals only; Blender data and imported modules are shared.",
+    "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": true},
     "inputSchema": {
       "type": "object",
       "properties": {
         "code": {
-          "type": "string"
+          "type": "string",
+          "description": "Python statements to execute. Use print(...) to return values; empty code is allowed for namespace reset."
         },
         "namespace": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 128
+          "maxLength": 128,
+          "description": "Unique task ID for persistent globals. Anyone using the same ID shares its globals."
         },
         "reset_namespace": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Clear this namespace before executing code; requires namespace when true. Use empty code to release stored variables when finished."
         }
       },
       "required": [
         "code"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {"reset_namespace": {"const": true}},
+        "required": ["reset_namespace"]
+      },
+      "then": {"required": ["namespace"]}
     }
   },
   {
     "name": "get_sketchfab_status",
     "description": "Check if Sketchfab integration is enabled in Blender.\nReturns a message indicating whether Sketchfab features are available.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": true},
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -89,6 +131,7 @@
   {
     "name": "search_sketchfab_models",
     "description": "Search for models on Sketchfab with optional filtering.\n\nParameters:\n- query: Text to search for\n- categories: Optional comma-separated list of categories\n- count: Maximum number of results to return (default 20)\n- downloadable: Whether to include only downloadable models (default True)\n\nReturns a formatted list of matching models.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": true},
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -120,6 +163,7 @@
   {
     "name": "get_sketchfab_model_preview",
     "description": "Get a preview thumbnail of a Sketchfab model by its UID.\nUse this to visually confirm a model before downloading.\n\nParameters:\n- uid: The unique identifier of the Sketchfab model (obtained from search_sketchfab_models)\n\nReturns the model's thumbnail as an Image for visual confirmation.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": true},
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -135,6 +179,7 @@
   },
   {
     "name": "download_sketchfab_model",
+    "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true},
     "description": "Download and import a Sketchfab model by its UID.\nThe model will be scaled so its largest dimension equals target_size.\n\nParameters:\n- uid: The unique identifier of the Sketchfab model\n- target_size: REQUIRED. The target size in Blender units/meters for the largest dimension.\n              You must specify the desired size for the model.\n              Examples:\n              - Chair: target_size=1.0 (1 meter tall)\n              - Table: target_size=0.75 (75cm tall)\n              - Car: target_size=4.5 (4.5 meters long)\n              - Person: target_size=1.7 (1.7 meters tall)\n              - Small object (cup, phone): target_size=0.1 to 0.3\n\nReturns JSON with import details including object names, dimensions, and bounding box.\nThe model must be downloadable and you must have proper access rights.",
     "inputSchema": {
       "type": "object",

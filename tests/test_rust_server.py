@@ -120,6 +120,9 @@ class Client:
             result = {
                 "image_data": base64.b64encode(b"image-bytes").decode(),
                 "format": "png",
+                "width": 640,
+                "height": 480,
+                "method": "offscreen",
             }
         elif params.get("name") == "missing":
             result = {"error": "Object not found"}
@@ -223,14 +226,97 @@ def test_all_tools_over_stdio_and_tcp(client):
             assert result["content"][0]["type"] == "image"
             assert result["content"][0]["mimeType"] == "image/png"
             assert base64.b64decode(result["content"][0]["data"]) == b"image-bytes"
+            metadata = result["structuredContent"]
+            assert metadata == json.loads(result["content"][1]["text"])
+            assert metadata["method"] == "offscreen"
+            assert (metadata["width"], metadata["height"]) == (640, 480)
+            assert "image_data" not in metadata
         elif name == "get_addon_status":
             assert json.loads(result["content"][0]["text"])["up_to_date"] is True
+        if name not in {"get_viewport_screenshot", "get_sketchfab_model_preview"}:
+            assert result["structuredContent"] == json.loads(
+                result["content"][0]["text"]
+            )
     assert len(client.commands) == len(CASES)
     prompts = client.rpc("prompts/list", {})["result"]["prompts"]
     assert [prompt["name"] for prompt in prompts] == ["asset_creation_strategy"]
     prompt = client.rpc("prompts/get", {"name": "asset_creation_strategy"})["result"]
     assert "record_trajectory_feedback" not in json.dumps(prompt)
     assert "get_viewport_screenshot" in json.dumps(prompt)
+
+
+def test_tool_annotations_distinguish_inspection_edits_and_network(client):
+    catalog = {
+        tool["name"]: tool for tool in client.rpc("tools/list", {})["result"]["tools"]
+    }
+    for name in (
+        "get_addon_status",
+        "get_scene_info",
+        "get_object_info",
+        "get_viewport_screenshot",
+    ):
+        assert catalog[name]["annotations"]["readOnlyHint"] is True
+        assert catalog[name]["annotations"]["openWorldHint"] is False
+    for name in (
+        "get_sketchfab_status",
+        "search_sketchfab_models",
+        "get_sketchfab_model_preview",
+    ):
+        assert catalog[name]["annotations"]["readOnlyHint"] is True
+        assert catalog[name]["annotations"]["openWorldHint"] is True
+    assert catalog["execute_blender_code"]["annotations"] == {
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+    assert catalog["download_sketchfab_model"]["annotations"] == {
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+
+
+def test_scene_filters_are_forwarded_and_invalid_inputs_stay_local(client):
+    arguments = {
+        "offset": 20,
+        "limit": 10,
+        "name_filter": "Cube",
+        "object_type": "MESH",
+        "selected_only": True,
+    }
+    result = client.call("get_scene_info", arguments)
+    assert not result.get("isError"), result
+    assert client.commands[-1] == {"type": "get_scene_info", "params": arguments}
+    count = len(client.commands)
+    for arguments in ({"offset": -1}, {"limit": 101}, {"selected_only": "yes"}):
+        assert client.call("get_scene_info", arguments)["isError"]
+    assert client.call("execute_blender_code", {"code": "", "reset_namespace": True})[
+        "isError"
+    ]
+    assert len(client.commands) == count
+
+
+def test_execution_diagnostics_reach_mcp_and_allow_recovery(client):
+    result = client.call(
+        "execute_blender_code",
+        {
+            "code": "import sys\nprint('before failure')\nprint('warning', file=sys.stderr)\nvalue = 42\nraise ValueError('fix me')",
+            "namespace": "diagnostic",
+        },
+    )
+    assert result["isError"]
+    message = result["content"][0]["text"]
+    assert 'File "<blender-mcp>", line 5' in message
+    assert "ValueError: fix me" in message
+    assert "before failure\n" in message
+    assert "warning\n" in message
+    result = client.call(
+        "execute_blender_code", {"code": "print(value)", "namespace": "diagnostic"}
+    )
+    assert not result.get("isError"), result
+    assert result["structuredContent"]["result"] == "42\n"
 
 
 def test_errors_are_visible_and_server_remains_usable(client):

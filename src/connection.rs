@@ -67,14 +67,25 @@ impl BlenderConnection {
                     .get("result")
                     .context("Blender response has no result")?;
                 if let Some(error) = result.get("error").filter(|e| !e.is_null()) {
-                    bail!("Blender: {error}");
+                    bail!(
+                        "Blender: {}",
+                        error
+                            .as_str()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| error.to_string())
+                    );
                 }
                 if result.get("success") == Some(&Value::Bool(false)) {
                     bail!("Blender: {}", result.get("message").unwrap_or(result));
                 }
                 Ok(result.clone())
             }
-            Some("error") => bail!("Blender: {}", response["message"]),
+            Some("error") => bail!(
+                "Blender: {}",
+                response["message"]
+                    .as_str()
+                    .context("Blender error response has no message")?
+            ),
             _ => {
                 *slot = None;
                 bail!("Invalid Blender response status");

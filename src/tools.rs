@@ -85,9 +85,14 @@ pub async fn execute(
             "webp" => "image/webp",
             other => bail!("Unsupported image format: {other}"),
         };
-        return Ok(CallToolResult::success(vec![ContentBlock::image(
-            data, mime,
-        )]));
+        let image = ContentBlock::image(data, mime);
+        result
+            .as_object_mut()
+            .context("Invalid image response")?
+            .remove("image_data");
+        let mut response = CallToolResult::structured(result);
+        response.content.insert(0, image);
+        return Ok(response);
     }
     if name == "get_addon_status" {
         ensure!(result.is_object(), "Invalid add-on information");
@@ -103,9 +108,7 @@ pub async fn execute(
         result["after_install"] =
             json!("Restart Blender or disable and enable the add-on, then Start MCP Server");
     }
-    Ok(CallToolResult::success(vec![ContentBlock::text(
-        serde_json::to_string_pretty(&result)?,
-    )]))
+    Ok(CallToolResult::structured(result))
 }
 
 #[cfg(test)]
@@ -144,6 +147,28 @@ mod tests {
             .is_err()
         );
         assert!(args("get_viewport_screenshot", json!({"max_size":0})).is_err());
+        for invalid in [
+            json!({"offset":-1}),
+            json!({"limit":0}),
+            json!({"limit":101}),
+            json!({"selected_only":"yes"}),
+        ] {
+            assert!(args("get_scene_info", invalid).is_err());
+        }
+        assert!(
+            args(
+                "execute_blender_code",
+                json!({"code":"", "reset_namespace":true})
+            )
+            .is_err()
+        );
+        assert!(
+            args(
+                "execute_blender_code",
+                json!({"code":"", "reset_namespace":false})
+            )
+            .is_ok()
+        );
         assert!(
             args("get_scene_info", json!({"user_prompt":"ignored"}))
                 .unwrap()
