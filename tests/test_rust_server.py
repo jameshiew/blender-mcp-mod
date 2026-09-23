@@ -283,6 +283,28 @@ CASES = [
         {"max_size": 1000, "viewport_index": 1, "camera_only": True},
     ),
     ("start_render", {}, "start_render", {}),
+    (
+        "start_animation_render",
+        {
+            "output_directory": "/tmp/film",
+            "frame_start": 1,
+            "frame_end": 12,
+            "frame_step": 2,
+        },
+        "start_animation_render",
+        {
+            "output_directory": "/tmp/film",
+            "frame_start": 1,
+            "frame_end": 12,
+            "frame_step": 2,
+        },
+    ),
+    (
+        "resume_animation_render",
+        {"output_directory": "/tmp/film"},
+        "resume_animation_render",
+        {"output_directory": "/tmp/film"},
+    ),
     ("get_render_status", {}, "get_render_status", {}),
     ("cancel_render", {"job_id": "job"}, "cancel_render", {"job_id": "job"}),
     (

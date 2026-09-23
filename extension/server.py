@@ -54,6 +54,8 @@ class BlenderMCPServer(CommandServer):
             "get_execution_result": self.execution.get_execution_result,
             "get_execution_changes": self.execution.get_execution_changes,
             "start_render": self.renders.start,
+            "start_animation_render": self.renders.start_animation,
+            "resume_animation_render": self.renders.resume_animation,
             "get_render_status": self.renders.status,
             "cancel_render": self.renders.cancel,
             "get_render_image": self.renders.image,

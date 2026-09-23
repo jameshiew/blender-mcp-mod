@@ -43,17 +43,15 @@ class BLENDERMCP_PT_Panel(bpy.types.Panel):
         if layout is None:
             return
         scene = current_scene(context)
+        server = cast(
+            BlenderMCPServer | None, getattr(bpy.types, "blendermcp_server", None)
+        )
         box = layout.box()
-        if scene.blendermcp_server_running:
-            box.label(
-                text=f"Connected on port {scene.blendermcp_port}", icon="CHECKMARK"
-            )
+        if server is not None and server.running:
+            box.label(text=f"Connected on port {server.port}", icon="CHECKMARK")
             box.operator("blendermcp.stop_server", text="Disconnect", icon="X")
         else:
             box.label(text="Not connected", icon="RADIOBUT_OFF")
-            server = cast(
-                BlenderMCPServer | None, getattr(bpy.types, "blendermcp_server", None)
-            )
             if server and server.last_error:
                 box.label(text="Run blender-mcp setup-connection", icon="ERROR")
             box.prop(scene, "blendermcp_port")

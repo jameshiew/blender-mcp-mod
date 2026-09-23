@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn catalog_preserves_tools_without_collection_parameters() {
         let tools = definitions().unwrap();
-        assert_eq!(tools.len(), 26);
+        assert_eq!(tools.len(), 28);
         for definition in tools {
             assert!(!definition.tool.name.contains("telemetry"));
             assert!(!definition.tool.name.contains("trajectory"));
@@ -181,6 +181,40 @@ mod tests {
             args("get_scene_info", json!({"user_prompt":"ignored"}))
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn validates_animation_tool_arguments() {
+        for invalid in [
+            json!({}),
+            json!({"output_directory":""}),
+            json!({"output_directory":"/tmp/film", "frame_step":0}),
+            json!({"output_directory":"/tmp/film", "frame_start":true}),
+            json!({"output_directory":"/tmp/film", "frame_end":1048575}),
+            json!({"output_directory":"/tmp/film", "resolution_percentage":101}),
+        ] {
+            assert!(args("start_animation_render", invalid).is_err());
+        }
+        assert!(args("resume_animation_render", json!({})).is_err());
+        assert!(args("get_render_image", json!({"job_id":"job", "frame":true})).is_err());
+        assert_eq!(
+            prepare(
+                "export_render",
+                args(
+                    "export_render",
+                    json!({
+                        "job_id":"job", "filepath":"/tmp/frame.png", "frame":12
+                    })
+                )
+                .unwrap()
+            )
+            .await
+            .unwrap(),
+            (
+                "export_render".into(),
+                json!({"job_id":"job", "filepath":"/tmp/frame.png", "frame":12, "overwrite":false})
+            )
         );
     }
 

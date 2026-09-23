@@ -440,8 +440,39 @@
     }
   },
   {
+    "name": "start_animation_render",
+    "description": "Render a PNG animation sequence from an immutable scene snapshot in a separate Blender process. output_directory must be a new absolute directory whose parent exists. Defaults to the scene's start, end, and step; the end is inclusive and the range may contain at most 10000 frames. Returns job_id and output_directory after saving the snapshot. Poll get_render_status, preview or export completed frames with get_render_image or export_render, and use cancel_render to stop. Frames are published atomically under frames/frame_0000001.png. The snapshot, frame checksums, and outputs survive cancellation, server restart, and job eviction; use resume_animation_render with the same directory to continue. Only one still or animation job can run per server. Uses saved camera cuts and render settings without changing the open scene. External assets and caches must remain on disk; auto-execution and compositor file-output nodes are disabled. Produces a PNG sequence, not an encoded video or audio track. A client timeout does not cancel the job; inspect get_render_status before retrying.",
+    "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "output_directory": {"type": "string", "minLength": 1, "description": "New absolute output directory on the Blender machine. A leading ~ is expanded. Existing directories are refused."},
+        "scene_name": {"type": "string", "minLength": 1, "description": "Exact scene name. Omit for the active scene."},
+        "frame_start": {"type": "integer", "minimum": -1048574, "maximum": 1048574, "description": "First frame. Omit for the scene's frame_start."},
+        "frame_end": {"type": "integer", "minimum": -1048574, "maximum": 1048574, "description": "Inclusive last frame bound. Must be at least frame_start. Omit for the scene's frame_end."},
+        "frame_step": {"type": "integer", "minimum": 1, "maximum": 1048574, "description": "Frame increment. Omit for the scene's frame_step."},
+        "resolution_percentage": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Override resolution percentage for this snapshot only."}
+      },
+      "required": ["output_directory"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "resume_animation_render",
+    "description": "Resume an animation job from its output_directory, including after cancellation, failure, server restart, or job eviction. Verifies the original scene snapshot and skips frames only when their saved size, dimensions, and SHA-256 match. Missing, partial, or changed frames are rendered again. Uses the original frame range, camera cuts, resolution, and scene snapshot; current scene edits are not included. Returns the original job_id with a new attempt. A directory already used by a worker is refused. All-complete jobs are verified without rendering again. Saved external assets must still be available. Poll get_render_status; elapsed_seconds measures the current attempt.",
+    "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "output_directory": {"type": "string", "minLength": 1, "description": "Absolute directory returned by start_animation_render. A leading ~ is expanded."}
+      },
+      "required": ["output_directory"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "get_render_status",
-    "description": "Get a render job's state, phase, elapsed time, scene, frame, image availability, and progress. States are running, cancelling, completed, cancelled, and failed. progress is null until the engine reports statistics; otherwise it includes status_text, the latest samples_completed/samples_total, sample_fraction, and remaining_seconds. Counts describe the most recent sampling stage and can reset for another layer or tile; sample_fraction is not overall job completion. Remaining time is an engine estimate for the current stage. Unavailable values are null. A failed job includes error_message. Omit job_id for the latest job. Jobs expire when the add-on server stops or eight newer jobs have started; use export_render to keep a completed image.",
+    "description": "Get a still or animation job's state, phase, elapsed time, scene, frame, image availability, and progress. States are running, cancelling, completed, cancelled, and failed. progress is null until engine statistics arrive; samples_completed, samples_total, sample_fraction, and remaining_seconds describe only the current sampling stage and can reset between layers or frames. Animation jobs also return output_directory, frame_start/end/step, frames_total, frames_completed, frame_fraction, last_completed_frame, fps (sequence playback rate including frame_step), and remaining_frames_seconds (an estimate from frames rendered this attempt). frame is the current frame; during startup it is the first requested frame. Animation images remain available after cancellation or failure. Unavailable estimates are null. A failed job includes error_message. Omit job_id for the latest job. In-memory handles expire on server stop or after eight newer jobs; resume_animation_render reloads durable animation output. elapsed_seconds measures the current attempt.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -454,7 +485,7 @@
   },
   {
     "name": "cancel_render",
-    "description": "Request cancellation of one render worker without interrupting the open Blender scene. Returns its current status; poll get_render_status until cancelled. Repeated requests are safe. A job that already finished keeps its completed, failed, or cancelled state. Stopping the add-on also stops its render worker.",
+    "description": "Request cancellation of one still or animation worker without interrupting the open Blender scene. Returns its current status; poll get_render_status until cancelled. Repeated requests are safe. A job that already finished keeps its terminal state. Completed animation frames and the scene snapshot are retained; use resume_animation_render to continue. An interrupted frame is rendered again. Stopping the add-on also stops its render worker.",
     "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -467,13 +498,14 @@
   },
   {
     "name": "get_render_image",
-    "description": "Return a completed job's camera render as a PNG image with job metadata, returned dimensions, and source dimensions. This is the saved result for that job, independent of later scene changes or renders. The image is scaled down to max_size without changing the saved full-resolution result. Running, failed, cancelled, and expired jobs return an error.",
+    "description": "Return a saved camera render as a PNG image with job metadata, returned dimensions, and source dimensions. Stills require a completed job. For animation jobs, choose a completed frame or omit frame for the highest completed frame; previews also work while running or after cancellation or failure. Verifies the animation frame checksum before reading. Scales down to max_size without changing the saved original. Expired job handles require resume_animation_render before access.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
         "job_id": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Exact job ID returned by start_render."},
-        "max_size": {"type": "integer", "minimum": 1, "maximum": 4096, "default": 1000, "description": "Maximum pixel size of the largest returned image dimension."}
+        "max_size": {"type": "integer", "minimum": 1, "maximum": 4096, "default": 1000, "description": "Maximum pixel size of the largest returned image dimension."},
+        "frame": {"type": "integer", "minimum": -1048574, "maximum": 1048574, "description": "Completed animation frame to retrieve. Omit for the highest completed frame. For still jobs, must match the rendered frame."}
       },
       "required": ["job_id"],
       "additionalProperties": false
@@ -563,7 +595,7 @@
   },
   {
     "name": "export_render",
-    "description": "Save a completed job's full-resolution PNG on the Blender machine. Copies the original bytes without resizing or changing the open scene. The destination parent directory must exist. Refuses existing paths unless overwrite=true; publishing the file is atomic. Returns filepath, dimensions, size_bytes, and sha256. Exported files survive job expiry and server restarts. Running, failed, cancelled, and expired jobs return an error.",
+    "description": "Save a full-resolution PNG on the Blender machine. Stills require a completed job. For animation jobs, choose a completed frame or omit frame for the highest completed frame; export also works while running or after cancellation or failure. Copies original bytes without resizing or changing the open scene. The destination parent must exist and must be outside managed render storage. Refuses existing paths unless overwrite=true; publication is atomic. Returns filepath, dimensions, size_bytes, and sha256. Exported files survive job expiry and server restart.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -588,6 +620,12 @@
           "type": "boolean",
           "default": false,
           "description": "Replace an existing destination file (default false)."
+        },
+        "frame": {
+          "type": "integer",
+          "minimum": -1048574,
+          "maximum": 1048574,
+          "description": "Completed animation frame to export. Omit for the highest completed frame. For still jobs, must match the rendered frame."
         }
       },
       "required": [

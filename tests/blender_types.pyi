@@ -15,5 +15,8 @@ class IDCollection(Protocol):
 class ColorSpace(Protocol):
     name: str
 
+class RenderEngine(Protocol):
+    engine: str
+
 class SceneRegistration(Protocol):
     blendermcp_server_running: object

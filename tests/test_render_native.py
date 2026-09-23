@@ -1,8 +1,9 @@
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
-from conftest import ROOT_ADDON, blender_environment
+from conftest import REPO_ROOT, blender_environment
 
 
 @pytest.mark.skipif(
@@ -10,7 +11,9 @@ from conftest import ROOT_ADDON, blender_environment
     reason="Set BLENDER_TEST_EXECUTABLE for native render jobs",
 )
 @pytest.mark.parametrize("engine", ["CYCLES", "BLENDER_EEVEE", "BLENDER_WORKBENCH"])
-def test_render_snapshot_image_cancellation_and_scene_preservation(tmp_path, engine):
+def test_render_snapshot_image_cancellation_and_scene_preservation(
+    tmp_path, engine, unpacked_addon
+):
     script = tmp_path / "check_render.py"
     script.write_text(
         """import base64
@@ -22,7 +25,9 @@ import sys
 import time
 import bpy
 
-spec = importlib.util.spec_from_file_location("render_jobs_native", MODULE_PATH)
+directory = Path(PACKAGE_PATH)
+sys.path.extend(str(wheel) for wheel in (directory / 'wheels').glob('*.whl'))
+spec = importlib.util.spec_from_file_location("render_jobs_native", directory / '__init__.py')
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
@@ -68,7 +73,7 @@ def wait(manager, job_id, observed=None):
         time.sleep(0.05)
     raise AssertionError(manager.status(job_id))
 
-manager = module.RenderJobs()
+manager = module.render_jobs.RenderJobs()
 try:
     first = manager.start(frame=3, resolution_percentage=50)
     assert first['state'] == 'running', first
@@ -114,7 +119,7 @@ try:
 finally:
     manager.close()
 assert destination.is_file()
-""".replace("MODULE_PATH", repr(str(ROOT_ADDON.with_name("render_jobs.py")))).replace(
+""".replace("PACKAGE_PATH", repr(str(unpacked_addon))).replace(
             "RENDER_ENGINE", repr(engine)
         )
     )
@@ -138,3 +143,44 @@ assert destination.is_file()
     )
     assert checked.returncode == 0, checked.stdout + checked.stderr
     assert "RENDER_JOBS_OK" in checked.stdout
+
+
+@pytest.mark.skipif(
+    not os.environ.get("BLENDER_TEST_EXECUTABLE"),
+    reason="Set BLENDER_TEST_EXECUTABLE for native animation jobs",
+)
+def test_animation_cancel_resume_camera_cuts_and_compositor(unpacked_addon, tmp_path):
+    script = tmp_path / "check_animation.py"
+    script.write_text(f"""import importlib.util
+import runpy
+import sys
+from pathlib import Path
+directory = Path({str(unpacked_addon)!r})
+sys.path.extend(str(wheel) for wheel in (directory / 'wheels').glob('*.whl'))
+spec = importlib.util.spec_from_file_location('animation_native', directory / '__init__.py')
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+checks = runpy.run_path({str(Path(__file__).with_name("blender_animation_checks.py"))!r})
+checks['run_checks'](module.render_jobs.RenderJobs(), Path({str(tmp_path / "film")!r}), Path({str(REPO_ROOT / "skills/blender-mcp/SKILL.md")!r}))
+""")
+    checked = subprocess.run(
+        [
+            os.environ["BLENDER_TEST_EXECUTABLE"],
+            "--background",
+            "--factory-startup",
+            "--offline-mode",
+            "--disable-autoexec",
+            "--python-exit-code",
+            "1",
+            "--python",
+            str(script),
+        ],
+        env=blender_environment(tmp_path / "profile"),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    assert "ANIMATION_CHECKS_OK" in checked.stdout
