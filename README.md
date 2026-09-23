@@ -1,4 +1,6 @@
-# MCP for Blender
+# blender-mcp-mod
+
+> This README.md is written by AI
 
 Control Blender from Codex through MCP. Codex launches the Rust executable,
 which connects to a Python extension running inside Blender. The executable
