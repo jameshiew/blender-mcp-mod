@@ -48,7 +48,7 @@
   },
   {
     "name": "get_object_info",
-    "description": "Inspect an object by exact name: local transforms, world matrix and location, dimensions, parent, collections, modifiers, visibility, materials, and mesh counts/bounds. Local location and Euler rotation (radians) are relative to the parent; use matrix_world for the full world transform. Mesh counts describe the base mesh. Bounds and dimensions use Blender's current cached object bounds and may reflect modifiers; instances are not enumerated.",
+    "description": "Inspect an object by exact name: local transforms, world matrix and location, dimensions, parent, collections, modifiers, visibility, materials, and mesh counts/bounds. Local location and Euler rotation (radians) are relative to the parent; use matrix_world for the full world transform. Top-level mesh counts describe the base mesh; bounds and dimensions use cached object bounds. With evaluated=true, adds evaluated data for the current frame and viewport dependency graph: mesh counts after modifiers, instance sources with per-copy mesh counts, mesh_including_instances totals, and world bounds/dimensions including generated instances. Evaluated bounds enclose transformed local mesh bounds. Meshes, curves, surfaces, text, and metaballs contribute mesh geometry; other types have null mesh, and bounds/dimensions are null when there are no vertices. Requires the object in the active view layer dependency graph. May be expensive for dense geometry.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -57,6 +57,10 @@
           "type": "string",
           "minLength": 1,
           "description": "Exact object name returned by scene inspection or code execution."
+        },
+        "evaluated": {
+          "type": "boolean",
+          "description": "Include evaluated mesh counts, instance-source summaries, and bounds including instances (default false). Uses viewport modifier settings at the current frame."
         }
       },
       "required": [

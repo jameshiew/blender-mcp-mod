@@ -189,6 +189,12 @@ CASES = [
     ("get_addon_status", {}, "get_addon_info", {}),
     ("get_scene_info", {}, "get_scene_info", {}),
     ("get_object_info", {"object_name": "Cube"}, "get_object_info", {"name": "Cube"}),
+    (
+        "get_object_info",
+        {"object_name": "Cube", "evaluated": True},
+        "get_object_info",
+        {"name": "Cube", "evaluated": True},
+    ),
     ("get_viewport_screenshot", {}, "get_viewport_screenshot", {"max_size": 1000}),
     ("start_render", {}, "start_render", {}),
     ("get_render_status", {}, "get_render_status", {}),
@@ -311,6 +317,15 @@ def test_tool_annotations_distinguish_inspection_edits_and_network(client):
         "idempotentHint": True,
         "openWorldHint": False,
     }
+
+
+@pytest.mark.parametrize("evaluated", [None, 0, "true", []])
+def test_object_rejects_invalid_evaluated_over_mcp(client, evaluated):
+    result = client.call(
+        "get_object_info", {"object_name": "Cube", "evaluated": evaluated}
+    )
+    assert result["isError"]
+    assert not client.commands
 
 
 def test_render_arguments_and_failures_over_mcp(client):

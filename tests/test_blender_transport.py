@@ -215,6 +215,18 @@ bpy.context.view_layer.update()
             assert child["dimensions"] == [2, 2, 2]
             assert child["mesh"] == {"vertices": 8, "edges": 12, "polygons": 6}
             assert child["modifiers"][0]["type"] == "BEVEL"
+            evaluated = call(
+                "get_object_info", {"object_name": "Inspect.Child", "evaluated": True}
+            )
+            assert evaluated["mesh"] == child["mesh"]
+            assert (
+                evaluated["evaluated"]["mesh"]["vertices"] > child["mesh"]["vertices"]
+            )
+            assert (
+                evaluated["evaluated"]["mesh_including_instances"]
+                == evaluated["evaluated"]["mesh"]
+            )
+            assert evaluated["evaluated"]["instances"]["count"] == 0
 
             failed = client.call(
                 "execute_blender_code",

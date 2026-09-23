@@ -107,6 +107,10 @@ fn main() {
             fs::read("extension/__init__.py").unwrap(),
         ),
         (
+            "geometry.py".into(),
+            fs::read("extension/geometry.py").unwrap(),
+        ),
+        (
             "render_jobs.py".into(),
             fs::read("extension/render_jobs.py").unwrap(),
         ),

@@ -589,10 +589,12 @@ class BlenderMCPServer:
         max_corner = mathutils.Vector(map(max, zip(*world_bbox_corners)))
         return [[*min_corner], [*max_corner]]
 
-    def get_object_info(self, name):
+    def get_object_info(self, name, evaluated=False):
         """Get detailed information about a specific object"""
         if not isinstance(name, str) or not name:
             raise ValueError("name must be a non-empty string")
+        if type(evaluated) is not bool:
+            raise ValueError("evaluated must be a boolean")
         obj = bpy.data.objects.get(name)
         if not obj:
             raise ValueError(f"Object not found: {name}")
@@ -645,6 +647,11 @@ class BlenderMCPServer:
                 "edges": len(mesh.edges),
                 "polygons": len(mesh.polygons),
             }
+
+        if evaluated:
+            from .geometry import evaluated_geometry
+
+            obj_info["evaluated"] = evaluated_geometry(obj)
 
         return obj_info
 

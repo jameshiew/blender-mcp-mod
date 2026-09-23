@@ -281,6 +281,8 @@ def test_parented_object_distinguishes_local_and_world_transforms(monkeypatch):
     assert result["selected"] is True
     assert result["materials"] == ["Material"]
     assert result["mesh"] == {"vertices": 8, "edges": 12, "polygons": 6}
+    assert "evaluated" not in result
+    assert server.get_object_info("Child", evaluated=False) == result
     parent_info = server.get_object_info("Parent")
     assert parent_info["parent"] is None
     assert parent_info["modifiers"] == []
@@ -300,3 +302,11 @@ def test_object_reports_missing_name(monkeypatch):
     server, _ = scene_server(monkeypatch)
     with pytest.raises(ValueError, match="Object not found: Missing"):
         server.get_object_info("Missing")
+
+
+@pytest.mark.parametrize("evaluated", [None, 0, 1, "true", []])
+def test_object_rejects_invalid_evaluated_before_data_access(monkeypatch, evaluated):
+    server, bpy = scene_server(monkeypatch)
+    bpy.data = None
+    with pytest.raises(ValueError, match="evaluated must be a boolean"):
+        server.get_object_info("Cube", evaluated=evaluated)
