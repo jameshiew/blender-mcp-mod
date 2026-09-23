@@ -14,8 +14,12 @@
   not require a protocol change.
 - Run `just verify` before committing version changes. Its tests check that
   the packaged extension version, numeric tuple, and protocol match the server.
+- Run `just sync-wheels` before the first Cargo build in a fresh checkout.
+  It downloads wheels selected from `uv.lock`; the build checks their hashes.
+  Keep wheel downloads explicit. `cargo build` must not download wheels.
 - After changing add-on dependencies, run `uv lock` and `just sync-wheels`.
-  Commit the wheels selected from `uv.lock`; the build checks their hashes.
+  Commit the dependency declarations and `uv.lock`.
+  Keep `extension/wheels/` ignored and untracked.
 
 # Validation and test fixtures
 
