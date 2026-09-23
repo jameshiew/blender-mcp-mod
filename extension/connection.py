@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import os
 import ssl
@@ -6,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 
-def config_directory(directory=None):
+def config_directory(directory: str | os.PathLike[str] | None = None) -> Path:
     return Path(
         directory
         if directory is not None
@@ -14,7 +16,7 @@ def config_directory(directory=None):
     )
 
 
-def load_tls_context(directory=None):
+def load_tls_context(directory: str | os.PathLike[str] | None = None) -> ssl.SSLContext:
     directory = config_directory(directory)
     if not directory.is_absolute():
         raise ValueError("BLENDER_MCP_CONFIG_DIR must be an absolute path")
@@ -30,8 +32,9 @@ def load_tls_context(directory=None):
             raise ValueError(
                 f"{item} must be a regular {'directory' if is_directory else 'file'} (no symlinks)"
             )
+        # ty does not narrow platform-specific APIs through os.name.
         if os.name == "posix" and (
-            metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077
+            metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077  # ty: ignore[possibly-missing-attribute]
         ):
             raise ValueError(
                 f"{item} must be owned by the current user with no group/other permissions"

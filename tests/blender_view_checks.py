@@ -1,13 +1,22 @@
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from blender_types import IDCollection
+
+
 def run_checks(server, viewport=False):
     import base64
     import math
     from itertools import product
+    from typing import cast
 
     import bpy
     from bpy_extras.object_utils import world_to_camera_view
     from mathutils import Matrix, Vector
 
     scene = bpy.context.scene
+    assert bpy.context.view_layer is not None
+    assert scene is not None
     original_camera = scene.camera
     render = scene.render
     render_fields = ("resolution_x", "resolution_y", "pixel_aspect_x", "pixel_aspect_y")
@@ -19,13 +28,16 @@ def run_checks(server, viewport=False):
         bpy.data.cameras,
     )
     original_data = [set(group) for group in data_groups]
-    selected = list(bpy.context.selected_objects)
+    selected = list(bpy.context.selected_objects or ())
     active = bpy.context.view_layer.objects.active
     view_state = None
+    space = r3d = other_view_state = None
     if viewport:
+        assert bpy.context.screen is not None
         area = next(area for area in bpy.context.screen.areas if area.type == "VIEW_3D")
-        space = area.spaces.active
+        space = cast(bpy.types.SpaceView3D, area.spaces.active)
         r3d = space.region_3d
+        assert r3d is not None
         view_state = {
             "view_rotation": r3d.view_rotation.copy(),
             "view_location": r3d.view_location.copy(),
@@ -61,7 +73,7 @@ def run_checks(server, viewport=False):
         )
         obj = bpy.data.objects.new("ViewCheck.Mesh", mesh)
         collection.objects.link(obj)
-        obj.modifiers.new("Array", "ARRAY").count = 3
+        cast(bpy.types.ArrayModifier, obj.modifiers.new("Array", "ARRAY")).count = 3
         instancer = bpy.data.objects.new("ViewCheck.Instance", None)
         instancer.instance_type = "COLLECTION"
         instancer.instance_collection = collection
@@ -143,7 +155,7 @@ def run_checks(server, viewport=False):
             object_names=targets,
             lens=30,
         )
-        assert camera.data.lens == 65
+        assert cast(bpy.types.Camera, camera.data).lens == 65
         camera.constraints.remove(constraint)
         server.handlers["set_camera"](
             object_name=camera.name,
@@ -155,7 +167,8 @@ def run_checks(server, viewport=False):
         )
 
         if viewport:
-            original_selection = [o.name for o in bpy.context.selected_objects]
+            assert space is not None and r3d is not None
+            original_selection = [o.name for o in (bpy.context.selected_objects or ())]
             original_transform = camera.matrix_world.copy()
             space.lock_camera = True
             instancer.hide_set(True)
@@ -174,7 +187,7 @@ def run_checks(server, viewport=False):
                 ), result
                 assert result["framed_objects"] == targets
                 assert [
-                    o.name for o in bpy.context.selected_objects
+                    o.name for o in (bpy.context.selected_objects or ())
                 ] == original_selection
                 assert camera.matrix_world == original_transform
                 for point in corners(instancer):
@@ -185,7 +198,7 @@ def run_checks(server, viewport=False):
                         and abs(clip.y / clip.w) < 1
                     ), (view, clip[:], result)
             server.handlers["set_viewport"](frame="ALL")
-            for selected_obj in bpy.context.selected_objects:
+            for selected_obj in bpy.context.selected_objects or ():
                 selected_obj.select_set(False)
             instancer.select_set(True)
             assert (
@@ -249,13 +262,16 @@ def run_checks(server, viewport=False):
             setattr(render, field, value)
         for group, original in zip(data_groups, original_data):
             for item in set(group) - original:
-                group.remove(item)
-        for obj in bpy.context.selected_objects:
+                cast("IDCollection", group).remove(item)
+        for obj in bpy.context.selected_objects or ():
             obj.select_set(False)
         for obj in selected:
             obj.select_set(True)
         bpy.context.view_layer.objects.active = active
         if view_state is not None:
+            assert (
+                space is not None and r3d is not None and other_view_state is not None
+            )
             for field, value in view_state.items():
                 setattr(r3d, field, value)
             (

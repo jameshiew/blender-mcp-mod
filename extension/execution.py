@@ -1,27 +1,53 @@
+from __future__ import annotations
+
+import hashlib
 import io
 import logging
+import os
 import traceback
+import uuid
+from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
+from typing import Any, NotRequired, TypedDict
 
 import bpy
 
+from . import recovery
 from .connection import config_directory
+from .context import current_scene
+from .recovery import Checkpoint, CheckpointList, Checkpoints, ObjectChange
 
 logger = logging.getLogger(__name__)
+
+
+class ExecutionResult(TypedDict):
+    started: bool
+    succeeded: bool
+    partial_changes: bool | None
+    result: str
+    error_message: NotRequired[str]
+    stderr: NotRequired[str]
+    output_truncated: NotRequired[bool]
+    execution_id: NotRequired[str]
+    namespace: NotRequired[str | None]
+    code_sha256: NotRequired[str]
+    checkpoint: NotRequired[Checkpoint]
+    changes: NotRequired[dict[str, object]]
+    summary_error: NotRequired[str]
 
 
 class BoundedOutput(io.TextIOBase):
     limit = 16_384
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._buffer = io.StringIO()
         self.remaining = self.limit
         self.truncated = False
 
-    def writable(self):
+    def writable(self) -> bool:
         return True
 
-    def write(self, text):
+    def write(self, text: str) -> int:
         if not isinstance(text, str):
             raise TypeError("write() argument must be str")
         retained = text[: self.remaining]
@@ -30,52 +56,54 @@ class BoundedOutput(io.TextIOBase):
         self.truncated |= len(retained) < len(text)
         return len(text)
 
-    def getvalue(self):
+    def getvalue(self) -> str:
         return self._buffer.getvalue()
 
 
 class ExecutionSession:
     result_limit = 8
 
-    def __init__(self, config_dir=None, running=lambda: False):
+    def __init__(
+        self,
+        config_dir: str | os.PathLike[str] | None = None,
+        running: Callable[[], bool] = lambda: False,
+    ) -> None:
         self.config_dir = config_dir
         self._running = running
-        self._execution_namespaces = {}
-        self._execution_results = {}
-        self._execution_changes = {}
-        self._checkpoints = None
+        self._execution_namespaces: dict[str, dict[str, Any]] = {}
+        self._execution_results: dict[str, ExecutionResult] = {}
+        self._execution_changes: dict[str, dict[str, list[ObjectChange]]] = {}
+        self._checkpoints: Checkpoints | None = None
 
-    def close(self):
+    def close(self) -> None:
         self._execution_namespaces.clear()
         self._execution_results.clear()
         self._execution_changes.clear()
 
-    def _checkpoint_store(self):
+    def _checkpoint_store(self) -> Checkpoints:
         if self._checkpoints is None:
-            from .recovery import Checkpoints
-
             self._checkpoints = Checkpoints(
                 config_directory(self.config_dir) / "checkpoints"
             )
         return self._checkpoints
 
-    def create_checkpoint(self, label=None):
+    def create_checkpoint(self, label: str | None = None) -> Checkpoint:
         return self._checkpoint_store().create(label)
 
-    def list_checkpoints(self):
+    def list_checkpoints(self) -> CheckpointList:
         return self._checkpoint_store().list()
 
-    def restore_checkpoint(self, checkpoint_id):
+    def restore_checkpoint(self, checkpoint_id: str) -> dict[str, object]:
         result = self._checkpoint_store().restore(
             checkpoint_id, self._execution_namespaces.clear
         )
-        bpy.context.scene.blendermcp_server_running = self._running()
+        current_scene().blendermcp_server_running = self._running()
         return result
 
-    def delete_checkpoint(self, checkpoint_id):
+    def delete_checkpoint(self, checkpoint_id: str) -> dict[str, object]:
         return self._checkpoint_store().delete(checkpoint_id)
 
-    def get_execution_result(self, execution_id=None):
+    def get_execution_result(self, execution_id: str | None = None) -> ExecutionResult:
         if execution_id is None:
             execution_id = next(reversed(self._execution_results), None)
         if (
@@ -87,7 +115,9 @@ class ExecutionSession:
             )
         return self._execution_results[execution_id]
 
-    def get_execution_changes(self, execution_id, category, offset=0, limit=100):
+    def get_execution_changes(
+        self, execution_id: str, category: str, offset: int = 0, limit: int = 100
+    ) -> dict[str, object]:
         from .recovery import SUMMARY_SCOPE, change_page
 
         self.get_execution_result(execution_id)
@@ -104,12 +134,12 @@ class ExecutionSession:
 
     def execute_code(
         self,
-        code,
-        namespace=None,
-        reset_namespace=False,
-        checkpoint=False,
-        summarize_changes=False,
-    ):
+        code: str,
+        namespace: str | None = None,
+        reset_namespace: bool = False,
+        checkpoint: bool = False,
+        summarize_changes: bool = False,
+    ) -> ExecutionResult:
         """Execute arbitrary Blender Python code"""
         if namespace is not None and (
             not isinstance(namespace, str) or not 1 <= len(namespace) <= 128
@@ -123,35 +153,26 @@ class ExecutionSession:
             )
         if type(checkpoint) is not bool or type(summarize_changes) is not bool:
             raise ValueError("checkpoint and summarize_changes must be booleans")
-        recovery = checkpoint or summarize_changes
-        if recovery:
-            import hashlib
-            import uuid
-
-            from .recovery import (
-                capture_objects,
-                compare_objects,
-            )
-            from .recovery import (
-                summarize_changes as summarize,
-            )
-
+        retain_result = checkpoint or summarize_changes
+        execution_id = code_sha256 = ""
+        if retain_result:
             execution_id = uuid.uuid4().hex
             code_sha256 = hashlib.sha256(code.encode()).hexdigest()
         before = saved = None
         started = False
         stdout = BoundedOutput()
         stderr = BoundedOutput()
+        result: ExecutionResult
         try:
             compiled = compile(code, "<blender-mcp>", "exec")
-            before = capture_objects() if summarize_changes else None
+            before = recovery.capture_objects() if summarize_changes else None
             saved = (
                 self.create_checkpoint(label=f"Before execution {execution_id}")
                 if checkpoint
                 else None
             )
             if namespace is None:
-                execution_namespace = {"bpy": bpy}
+                execution_namespace: dict[str, Any] = {"bpy": bpy}
             else:
                 if reset_namespace:
                     self._execution_namespaces.pop(namespace, None)
@@ -199,17 +220,19 @@ class ExecutionSession:
             result["stderr"] = stderr.getvalue()
         if stdout.truncated or stderr.truncated:
             result["output_truncated"] = True
-        if recovery:
+        if retain_result:
             result["execution_id"] = execution_id
             result["namespace"] = namespace
             result["code_sha256"] = code_sha256
             if saved is not None:
                 result["checkpoint"] = saved
-            if summarize_changes and started:
+            if summarize_changes and started and before is not None:
                 try:
-                    changes = compare_objects(before, capture_objects())
+                    changes = recovery.compare_objects(
+                        before, recovery.capture_objects()
+                    )
                     self._execution_changes[execution_id] = changes
-                    result["changes"] = summarize(changes)
+                    result["changes"] = recovery.summarize_changes(changes)
                     if not result["succeeded"] and any(changes.values()):
                         result["partial_changes"] = True
                 except Exception as error:

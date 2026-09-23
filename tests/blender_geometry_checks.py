@@ -1,10 +1,18 @@
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from blender_types import IDCollection, NodeInterface
+
+
 def run_checks(server):
     import math
+    from typing import cast
 
     import bpy
     from mathutils import Matrix
 
     scene = bpy.context.scene
+    assert scene is not None
     original_frame = scene.frame_current
     original_subframe = scene.frame_subframe
     data_groups = (
@@ -140,22 +148,28 @@ def run_checks(server):
         emitter = bpy.data.objects.new("GeometryCheck.Nodes", points)
         collection.objects.link(emitter)
         group = bpy.data.node_groups.new("GeometryCheck.Instances", "GeometryNodeTree")
-        group.interface.new_socket(
+        cast("NodeInterface", group.interface).new_socket(
             name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry"
         )
-        group.interface.new_socket(
+        cast("NodeInterface", group.interface).new_socket(
             name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry"
         )
         inputs = group.nodes.new("NodeGroupInput")
         outputs = group.nodes.new("NodeGroupOutput")
         source_node = group.nodes.new("GeometryNodeObjectInfo")
-        source_node.inputs["Object"].default_value = plant
-        source_node.inputs["As Instance"].default_value = True
+        cast(
+            bpy.types.NodeSocketObject, source_node.inputs["Object"]
+        ).default_value = plant
+        cast(
+            bpy.types.NodeSocketBool, source_node.inputs["As Instance"]
+        ).default_value = True
         instances = group.nodes.new("GeometryNodeInstanceOnPoints")
         group.links.new(inputs.outputs["Geometry"], instances.inputs["Points"])
         group.links.new(source_node.outputs["Geometry"], instances.inputs["Instance"])
         group.links.new(instances.outputs["Instances"], outputs.inputs["Geometry"])
-        emitter.modifiers.new("Instances", "NODES").node_group = group
+        cast(
+            bpy.types.NodesModifier, emitter.modifiers.new("Instances", "NODES")
+        ).node_group = group
         nodes = inspect(emitter)
         assert nodes["mesh"] == {"vertices": 0, "edges": 0, "polygons": 0}, nodes
         assert nodes["instances"]["count"] == 2, nodes
@@ -174,7 +188,11 @@ def run_checks(server):
         close_bounds(realized["world_bounding_box"], nodes["world_bounding_box"])
 
         primitive = group.nodes.new("GeometryNodeMeshCube")
-        primitive.inputs["Size"].default_value = (2, 2, 2)
+        cast(bpy.types.NodeSocketVector, primitive.inputs["Size"]).default_value = (
+            2,
+            2,
+            2,
+        )
         group.links.new(primitive.outputs["Mesh"], instances.inputs["Instance"])
         group.links.new(instances.outputs["Instances"], outputs.inputs["Geometry"])
         procedural = inspect(emitter)
@@ -264,5 +282,5 @@ def run_checks(server):
     finally:
         for group, original in zip(data_groups, original_data):
             for item in set(group) - original:
-                group.remove(item)
+                cast("IDCollection", group).remove(item)
         scene.frame_set(original_frame, subframe=original_subframe)

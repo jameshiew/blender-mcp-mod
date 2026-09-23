@@ -35,6 +35,40 @@ def archive_bytes(entries):
     return content.getvalue()
 
 
+@pytest.mark.parametrize("data", [[], "unexpected", 42])
+def test_search_rejects_non_object_json(addon, monkeypatch, data):
+    service, module, _ = sketchfab_service(addon)
+    monkeypatch.setattr(
+        module.requests, "get", lambda *_args, **_kwargs: response(data), raising=False
+    )
+    result = service.search_sketchfab_models("chair")
+    assert "expected an object" in result["error"]
+
+
+@pytest.mark.parametrize(
+    "thumbnail",
+    [{"url": 42}, {"width": "wide", "url": "https://images.example/preview.png"}],
+)
+def test_preview_validates_thumbnail_fields(addon, monkeypatch, thumbnail):
+    service, module, _ = sketchfab_service(addon)
+    requests = []
+
+    def get(url, **kwargs):
+        requests.append(url)
+        if len(requests) == 1:
+            return response({"thumbnails": {"images": [thumbnail]}})
+        return response(content=b"image")
+
+    monkeypatch.setattr(module.requests, "get", get, raising=False)
+    result = service.get_sketchfab_model_preview("chair")
+    if isinstance(thumbnail["url"], str):
+        assert result["success"]
+        assert len(requests) == 2
+    else:
+        assert result == {"error": "Thumbnail URL not found"}
+        assert len(requests) == 1
+
+
 def local_download(monkeypatch, module, tmp_path, content):
     temporary_directory = tempfile.TemporaryDirectory
     monkeypatch.setattr(

@@ -1,25 +1,36 @@
+from __future__ import annotations
+
 import json
 import re
 import struct
 import sys
 import traceback
 from pathlib import Path
+from typing import TypedDict
 
 import bpy
 
 
-def write_status(directory, **status):
+def write_status(directory: Path, **status: object) -> None:
     path = directory / "status.tmp"
     path.write_text(json.dumps(status), encoding="utf-8")
     path.replace(directory / "status.json")
 
 
-class RenderProgress:
-    def __init__(self, directory):
-        self.directory = directory
-        self.progress = None
+class Progress(TypedDict):
+    status_text: str
+    samples_completed: int | None
+    samples_total: int | None
+    sample_fraction: float | None
+    remaining_seconds: float | None
 
-    def update(self, statistics, *_args):
+
+class RenderProgress:
+    def __init__(self, directory: Path) -> None:
+        self.directory = directory
+        self.progress: Progress | None = None
+
+    def update(self, statistics: object, *_args: object) -> None:
         if not isinstance(statistics, str):
             return
         samples = re.search(
@@ -33,28 +44,34 @@ class RenderProgress:
             seconds = 0.0
             for component in remaining[1].split(":"):
                 seconds = seconds * 60 + float(component)
-        previous = self.progress or {}
+        previous = self.progress
         completed, total = (
             (int(value) for value in samples.groups())
             if samples
-            else (previous.get("samples_completed"), previous.get("samples_total"))
+            else (previous["samples_completed"], previous["samples_total"])
+            if previous
+            else (None, None)
         )
         self.progress = {
             "status_text": statistics[:2048],
             "samples_completed": completed,
             "samples_total": total,
-            "sample_fraction": min(1.0, completed / total) if total else None,
+            "sample_fraction": min(1.0, completed / total)
+            if total and completed is not None
+            else None,
             "remaining_seconds": seconds,
         }
         self.write("rendering")
 
-    def write(self, phase, **fields):
+    def write(self, phase: str, **fields: object) -> None:
         if phase != "rendering" and self.progress:
             self.progress = {**self.progress, "remaining_seconds": None}
         write_status(self.directory, phase=phase, progress=self.progress, **fields)
 
 
-def mute_file_outputs(tree, visited=None):
+def mute_file_outputs(
+    tree: bpy.types.NodeTree | None, visited: set[bpy.types.NodeTree] | None = None
+) -> None:
     if tree is None:
         return
     if visited is None:
@@ -66,10 +83,10 @@ def mute_file_outputs(tree, visited=None):
         if node.type == "OUTPUT_FILE":
             node.mute = True
         if node.type == "GROUP":
-            mute_file_outputs(node.node_tree, visited)
+            mute_file_outputs(getattr(node, "node_tree", None), visited)
 
 
-def render(directory):
+def render(directory: Path) -> None:
     request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
     scene = bpy.data.scenes[request["scene"]]
     scene.frame_set(request["frame"])

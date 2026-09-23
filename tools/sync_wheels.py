@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import tomllib
 from pathlib import Path
@@ -6,7 +8,7 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def main():
+def main() -> None:
     lock = tomllib.loads((ROOT / "uv.lock").read_text())
     packages = lock["package"]
     project = next(

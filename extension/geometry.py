@@ -1,12 +1,49 @@
+from __future__ import annotations
+
 from itertools import product
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import bpy
 from mathutils import Vector
 
+from .context import current_scene
+
+if TYPE_CHECKING:
+    from mathutils import Matrix
+
+Bounds = list[list[float]]
+
+
+class InstanceSource(TypedDict):
+    name: str
+    library: str | None
+    type: str
+    count: int
+    mesh: dict[str, int] | None
+
+
+class Instances(TypedDict):
+    count: int
+    sources: list[InstanceSource]
+
+
+class EvaluatedGeometry(TypedDict):
+    frame: int
+    depsgraph_mode: str
+    mesh: dict[str, int] | None
+    mesh_including_instances: dict[str, int]
+    world_bounding_box: Bounds | None
+    dimensions: list[float] | None
+    instance_collection: str | None
+    instances: Instances
+
+
 _CONVERTIBLE_TYPES = {"CURVE", "SURFACE", "FONT", "META"}
 
 
-def _mesh_geometry(obj):
+def _mesh_geometry(
+    obj: bpy.types.Object,
+) -> tuple[dict[str, int] | None, Bounds | None]:
     if obj.type != "MESH" and obj.type not in _CONVERTIBLE_TYPES:
         return None, None
     try:
@@ -22,7 +59,7 @@ def _mesh_geometry(obj):
         for vertex in mesh.vertices:
             point = vertex.co
             if bounds is None:
-                bounds = [list(point), list(point)]
+                bounds = [list(point[:]), list(point[:])]
             else:
                 for axis in range(3):
                     bounds[0][axis] = min(bounds[0][axis], point[axis])
@@ -32,13 +69,15 @@ def _mesh_geometry(obj):
         obj.to_mesh_clear()
 
 
-def _include_bounds(bounds, local_bounds, matrix):
+def _include_bounds(
+    bounds: Bounds | None, local_bounds: Bounds | None, matrix: Matrix
+) -> Bounds | None:
     if local_bounds is None:
         return bounds
     for corner in product(*zip(*local_bounds)):
         point = matrix @ Vector(corner)
         if bounds is None:
-            bounds = [list(point), list(point)]
+            bounds = [list(point[:]), list(point[:])]
         else:
             for axis in range(3):
                 bounds[0][axis] = min(bounds[0][axis], point[axis])
@@ -46,16 +85,16 @@ def _include_bounds(bounds, local_bounds, matrix):
     return bounds
 
 
-def _geometry_key(obj):
+def _geometry_key(obj: bpy.types.Object) -> tuple[int, str, int | None]:
     # Instance object wrappers can change or reuse addresses during iteration.
     return (
-        obj.original.as_pointer(),
+        cast("bpy.types.Object", obj.original).as_pointer(),
         obj.type,
         obj.data.as_pointer() if obj.data is not None else None,
     )
 
 
-def evaluated_geometry(obj):
+def evaluated_geometry(obj: bpy.types.Object) -> EvaluatedGeometry:
     depsgraph = bpy.context.evaluated_depsgraph_get()
     evaluated = obj.evaluated_get(depsgraph)
     if not evaluated.is_evaluated:
@@ -68,7 +107,7 @@ def evaluated_geometry(obj):
         dict(mesh) if mesh is not None else {"vertices": 0, "edges": 0, "polygons": 0}
     )
     cache = {_geometry_key(evaluated): (mesh, local_bounds)}
-    sources = {}
+    sources: dict[tuple[int, str, int | None], InstanceSource] = {}
     instance_count = 0
     converted_paths = set()
     if evaluated.type in _CONVERTIBLE_TYPES and mesh is not None:
@@ -81,7 +120,9 @@ def evaluated_geometry(obj):
         ):
             continue
         source = instance.object
-        original_pointer = source.original.as_pointer()
+        if source is None:
+            continue
+        original_pointer = cast("bpy.types.Object", source.original).as_pointer()
         path = tuple(index for index in instance.persistent_id if index != 2147483647)
         # Blender also emits a converted object's own mesh as component zero.
         if (
@@ -98,7 +139,7 @@ def evaluated_geometry(obj):
         if source.type in _CONVERTIBLE_TYPES and instance_mesh is not None:
             converted_paths.add((original_pointer, path))
         if key not in sources:
-            original = source.original
+            original = cast("bpy.types.Object", source.original)
             sources[key] = {
                 "name": original.name,
                 "library": original.library.filepath if original.library else None,
@@ -113,7 +154,7 @@ def evaluated_geometry(obj):
                 total[field] += instance_mesh[field]
         bounds = _include_bounds(bounds, instance_bounds, instance.matrix_world)
     return {
-        "frame": bpy.context.scene.frame_current,
+        "frame": current_scene().frame_current,
         "depsgraph_mode": depsgraph.mode,
         "mesh": mesh,
         "mesh_including_instances": total,
@@ -134,11 +175,11 @@ def evaluated_geometry(obj):
     }
 
 
-def world_bounding_box(obj):
+def world_bounding_box(obj: bpy.types.Object) -> Bounds:
     if obj.type != "MESH":
         raise TypeError("Object must be a mesh")
     local_bbox_corners = [Vector(corner) for corner in obj.bound_box]
     world_bbox_corners = [obj.matrix_world @ corner for corner in local_bbox_corners]
-    min_corner = Vector(map(min, zip(*world_bbox_corners)))
-    max_corner = Vector(map(max, zip(*world_bbox_corners)))
+    min_corner = Vector(tuple(map(min, zip(*world_bbox_corners))))
+    max_corner = Vector(tuple(map(max, zip(*world_bbox_corners))))
     return [[*min_corner], [*max_corner]]

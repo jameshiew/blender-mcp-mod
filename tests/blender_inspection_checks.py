@@ -1,12 +1,22 @@
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from blender_types import ColorSpace, IDCollection, NodeInterface
+
+    from extension.inspection import ModifierProperties
+
 import json
+from typing import cast
 
 import bpy
 
 
 def run_checks(server):
     scene = bpy.context.scene
+    assert bpy.context.view_layer is not None
+    assert scene is not None
     frame = (scene.frame_current, scene.frame_subframe)
-    selection = list(bpy.context.selected_objects)
+    selection = list(bpy.context.selected_objects or ())
     active = bpy.context.view_layer.objects.active
     groups = [
         bpy.data.objects,
@@ -27,47 +37,68 @@ def run_checks(server):
         scene.collection.objects.link(target)
         material = bpy.data.materials.new("Inspection.Material")
         material.use_nodes = True
-        obj.data.materials.append(material)
-        obj.data.materials.append(None)
+        mesh.materials.append(material)
+        mesh.materials.append(None)
+        assert material.node_tree is not None
         shader = next(
             node for node in material.node_tree.nodes if node.type == "BSDF_PRINCIPLED"
         )
-        shader.inputs["Metallic"].default_value = 0.75
-        shader.inputs["Roughness"].default_value = 0.2
+        cast(bpy.types.NodeSocketFloat, shader.inputs["Metallic"]).default_value = 0.75
+        cast(bpy.types.NodeSocketFloat, shader.inputs["Roughness"]).default_value = 0.2
         shader.inputs["Roughness"].keyframe_insert("default_value", frame=1)
-        shader.inputs["Roughness"].default_value = 0.8
+        cast(bpy.types.NodeSocketFloat, shader.inputs["Roughness"]).default_value = 0.8
         shader.inputs["Roughness"].keyframe_insert("default_value", frame=120)
-        ramp = material.node_tree.nodes.new("ShaderNodeValToRGB")
+        ramp = cast(
+            bpy.types.ShaderNodeValToRGB,
+            material.node_tree.nodes.new("ShaderNodeValToRGB"),
+        )
+        assert ramp.color_ramp is not None
+        assert ramp.outputs is not None
         ramp.color_ramp.elements[0].color = (1, 0.1, 0.2, 1)
         material.node_tree.links.new(ramp.outputs["Color"], shader.inputs["Base Color"])
-        texture = material.node_tree.nodes.new("ShaderNodeTexImage")
+        texture = cast(
+            bpy.types.ShaderNodeTexImage,
+            material.node_tree.nodes.new("ShaderNodeTexImage"),
+        )
         image = bpy.data.images.new("Inspection.Image", width=1, height=1)
-        image.colorspace_settings.name = "Non-Color"
+        assert image.colorspace_settings is not None
+        cast("ColorSpace", image.colorspace_settings).name = "Non-Color"
         texture.image = image
-        group = bpy.data.node_groups.new("Inspection.ShaderGroup", "ShaderNodeTree")
-        group.interface.new_socket(
+        group = cast(
+            bpy.types.ShaderNodeTree,
+            bpy.data.node_groups.new("Inspection.ShaderGroup", "ShaderNodeTree"),
+        )
+        cast("NodeInterface", group.interface).new_socket(
             name="Factor", in_out="INPUT", socket_type="NodeSocketFloat"
         )
-        group.nodes.new("ShaderNodeValue").outputs[0].default_value = 0.42
-        nested = material.node_tree.nodes.new("ShaderNodeGroup")
+        cast(
+            bpy.types.NodeSocketFloat, group.nodes.new("ShaderNodeValue").outputs[0]
+        ).default_value = 0.42
+        nested = cast(
+            bpy.types.ShaderNodeGroup, material.node_tree.nodes.new("ShaderNodeGroup")
+        )
         nested.node_tree = group
-        array = obj.modifiers.new("Copies", "ARRAY")
+        array = cast(bpy.types.ArrayModifier, obj.modifiers.new("Copies", "ARRAY"))
         array.count = 7
         array.relative_offset_displace = (2, 0, 0)
         array.offset_object = target
         geo = bpy.data.node_groups.new("Inspection.Geometry", "GeometryNodeTree")
-        geo.interface.new_socket(
+        cast("NodeInterface", geo.interface).new_socket(
             name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry"
         )
-        geo.interface.new_socket(
+        cast("NodeInterface", geo.interface).new_socket(
             name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry"
         )
-        factor = geo.interface.new_socket(
+        factor = cast("NodeInterface", geo.interface).new_socket(
             name="Height", in_out="INPUT", socket_type="NodeSocketFloat"
         )
-        node_mod = obj.modifiers.new("Procedural", "NODES")
+        node_mod = cast(
+            bpy.types.NodesModifier, obj.modifiers.new("Procedural", "NODES")
+        )
         node_mod.node_group = geo
-        input_property = getattr(node_mod.properties.inputs, factor.identifier)
+        input_property = getattr(
+            cast("ModifierProperties", node_mod.properties).inputs, factor.identifier
+        )
         input_property.value = 3.75
         input_property.type = "ATTRIBUTE"
         input_property.attribute_name = "height"
@@ -75,7 +106,7 @@ def run_checks(server):
         own_slot = action.slots.new("OBJECT", obj.name)
         other_slot = action.slots.new("OBJECT", target.name)
         layer = action.layers.new("Layer")
-        strip = layer.strips.new(type="KEYFRAME")
+        strip = cast(bpy.types.ActionKeyframeStrip, layer.strips.new(type="KEYFRAME"))
         own_curve = strip.channelbag(own_slot, ensure=True).fcurves.new(
             "location", index=0
         )
@@ -89,10 +120,13 @@ def run_checks(server):
         other_curve.keyframe_points.insert(20, 4)
         other_curve.convert_to_samples(start=9, end=21)
         obj.animation_data_create().action = action
+        assert obj.animation_data is not None
         obj.animation_data.action_slot = own_slot
         target.animation_data_create().action = action
+        assert target.animation_data is not None
         target.animation_data.action_slot = other_slot
-        driver = obj.driver_add("rotation_euler", 2).driver
+        driver = cast(bpy.types.FCurve, obj.driver_add("rotation_euler", 2)).driver
+        assert driver is not None
         driver.expression = "source * 2"
         variable = driver.variables.new()
         variable.name = "source"
@@ -257,7 +291,7 @@ def run_checks(server):
         )
         json.dumps([detailed, material_result, node_group, result], allow_nan=False)
         assert frame == (scene.frame_current, scene.frame_subframe)
-        assert list(bpy.context.selected_objects) == selection
+        assert list(bpy.context.selected_objects or ()) == selection
         assert bpy.context.view_layer.objects.active == active
         return {
             "material_nodes": len(nodes),
@@ -269,4 +303,4 @@ def run_checks(server):
     finally:
         for group, before in zip(groups, original):
             for item in set(group) - before:
-                group.remove(item, do_unlink=True)
+                cast("IDCollection", group).remove(item, do_unlink=True)

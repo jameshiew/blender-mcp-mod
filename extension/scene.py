@@ -1,19 +1,23 @@
+from __future__ import annotations
+
 import logging
+from typing import cast
 
 import bpy
 
+from .context import current_scene
 from .geometry import world_bounding_box
 
 logger = logging.getLogger(__name__)
 
 
 def get_scene_info(
-    offset=0,
-    limit=20,
-    name_filter=None,
-    object_type=None,
-    selected_only=False,
-):
+    offset: int = 0,
+    limit: int = 20,
+    name_filter: str | None = None,
+    object_type: str | None = None,
+    selected_only: bool = False,
+) -> dict[str, object]:
     """Get information about the current Blender scene"""
     try:
         if type(offset) is not int or offset < 0:
@@ -32,11 +36,13 @@ def get_scene_info(
             raise ValueError("selected_only must be a boolean")
         if object_type is not None and object_type not in {
             item.identifier
-            for item in bpy.types.Object.bl_rna.properties["type"].enum_items
+            for item in cast(
+                "bpy.types.EnumProperty", bpy.types.Object.bl_rna.properties["type"]
+            ).enum_items
         }:
             raise ValueError(f"Unsupported object_type: {object_type}")
 
-        scene = bpy.context.scene
+        scene = current_scene()
         name_filter = name_filter.casefold() if name_filter is not None else None
         matching_objects = sorted(
             (
@@ -53,10 +59,11 @@ def get_scene_info(
         if next_offset >= len(matching_objects):
             next_offset = None
         active_object = bpy.context.active_object
-        scene_info = {
+        objects: list[dict[str, object]] = []
+        scene_info: dict[str, object] = {
             "name": scene.name,
             "object_count": len(scene.objects),
-            "objects": [],
+            "objects": objects,
             "materials_count": len(bpy.data.materials),
             "matching_objects": len(matching_objects),
             "returned_count": len(page),
@@ -78,7 +85,7 @@ def get_scene_info(
         }
 
         for obj in page:
-            obj_info = {
+            obj_info: dict[str, object] = {
                 "name": obj.name,
                 "type": obj.type,
                 "location": [
@@ -90,7 +97,7 @@ def get_scene_info(
                 "selected": obj.select_get(),
                 "visible": obj.visible_get(),
             }
-            scene_info["objects"].append(obj_info)
+            objects.append(obj_info)
 
         return scene_info
     except Exception as e:
@@ -98,7 +105,9 @@ def get_scene_info(
         return {"error": str(e)}
 
 
-def get_object_info(name, evaluated=False, details=False):
+def get_object_info(
+    name: str, evaluated: bool = False, details: bool = False
+) -> dict[str, object]:
     """Get detailed information about a specific object"""
     if not isinstance(name, str) or not name:
         raise ValueError("name must be a non-empty string")
@@ -110,7 +119,8 @@ def get_object_info(name, evaluated=False, details=False):
     if not obj:
         raise ValueError(f"Object not found: {name}")
 
-    obj_info = {
+    materials: list[str] = []
+    obj_info: dict[str, object] = {
         "name": obj.name,
         "type": obj.type,
         "location": [obj.location.x, obj.location.y, obj.location.z],
@@ -137,7 +147,7 @@ def get_object_info(name, evaluated=False, details=False):
         ],
         "selected": obj.select_get(),
         "visible": obj.visible_get(),
-        "materials": [],
+        "materials": materials,
     }
 
     if obj.type == "MESH":
@@ -146,10 +156,10 @@ def get_object_info(name, evaluated=False, details=False):
 
     for slot in obj.material_slots:
         if slot.material:
-            obj_info["materials"].append(slot.material.name)
+            materials.append(slot.material.name)
 
     if obj.type == "MESH" and obj.data:
-        mesh = obj.data
+        mesh = cast("bpy.types.Mesh", obj.data)
         obj_info["mesh"] = {
             "vertices": len(mesh.vertices),
             "edges": len(mesh.edges),

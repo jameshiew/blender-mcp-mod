@@ -1,15 +1,21 @@
+from __future__ import annotations
+
 import base64
 import io
 import json
 import logging
 import tempfile
 import zipfile
+from collections.abc import Callable, Sequence
 from pathlib import Path, PurePosixPath
+from typing import TypedDict, Unpack
 
 import bpy
 import requests
+from mathutils import Vector
 
-from .geometry import world_bounding_box
+from .context import current_view_layer
+from .geometry import Bounds, world_bounding_box
 
 logger = logging.getLogger(__name__)
 API_URL = "https://api.sketchfab.com/v3"
@@ -19,13 +25,32 @@ class SketchfabError(Exception):
     pass
 
 
-def _http_get(url, **kwargs):
+class RequestOptions(TypedDict, total=False):
+    timeout: float
+    headers: dict[str, str]
+    params: dict[str, str | int | bool] | None
+
+
+def _json_object(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise SketchfabError(
+            "Unexpected response format from Sketchfab API: expected an object"
+        )
+    return value
+
+
+def _medium_thumbnail(thumbnail: dict[str, object]) -> bool:
+    width = thumbnail.get("width", 0)
+    return isinstance(width, (int, float)) and 400 <= width <= 800
+
+
+def _http_get(url: str, **kwargs: Unpack[RequestOptions]) -> requests.Response:
     if not bpy.app.online_access:
         raise RuntimeError("Online access is disabled in Blender preferences")
     return requests.get(url, **kwargs)
 
 
-def _mesh_bounds(meshes):
+def _mesh_bounds(meshes: Sequence[bpy.types.Object]) -> Bounds | None:
     bounds = None
     for mesh in meshes:
         mesh_bounds = world_bounding_box(mesh)
@@ -38,7 +63,9 @@ def _mesh_bounds(meshes):
     return bounds
 
 
-def _import_archive(content, normalize_size, target_size):
+def _import_archive(
+    content: bytes, normalize_size: bool, target_size: float
+) -> dict[str, object]:
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
         directory = Path(temporary)
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
@@ -60,7 +87,7 @@ def _import_archive(content, normalize_size, target_size):
         if main_file is None:
             raise SketchfabError("No glTF file found in the downloaded model")
         bpy.ops.import_scene.gltf(filepath=str(main_file))
-        imported = list(bpy.context.selected_objects)
+        imported = list(bpy.context.selected_objects or ())
 
     roots = [obj for obj in imported if obj.parent is None]
     meshes = []
@@ -78,13 +105,13 @@ def _import_archive(content, normalize_size, target_size):
         if max_dimension > 0:
             scale_applied = target_size / max_dimension
             for root in roots:
-                root.scale = tuple(
-                    component * scale_applied for component in root.scale
+                root.scale = Vector(
+                    tuple(component * scale_applied for component in root.scale)
                 )
-            bpy.context.view_layer.update()
+            current_view_layer().update()
             bounds = _mesh_bounds(meshes)
 
-    result = {
+    result: dict[str, object] = {
         "success": True,
         "message": "Model imported successfully",
         "imported_objects": [obj.name for obj in imported],
@@ -98,11 +125,18 @@ def _import_archive(content, normalize_size, target_size):
 
 
 class SketchfabService:
-    def __init__(self, api_key, enabled):
+    def __init__(self, api_key: Callable[[], str], enabled: Callable[[], bool]) -> None:
         self._api_key = api_key
         self._enabled = enabled
 
-    def _request_json(self, path, failure, *, missing=None, **kwargs):
+    def _request_json(
+        self,
+        path: str,
+        failure: str,
+        *,
+        missing: str | None = None,
+        params: dict[str, str | int | bool] | None = None,
+    ) -> dict[str, object] | None:
         api_key = self._api_key()
         if not api_key:
             raise SketchfabError("Sketchfab API key is not configured")
@@ -110,7 +144,7 @@ class SketchfabService:
             f"{API_URL}/{path}",
             headers={"Authorization": f"Token {api_key}"},
             timeout=30,
-            **kwargs,
+            params=params,
         )
         if response.status_code == 401:
             raise SketchfabError("Authentication failed (401). Check your API key.")
@@ -118,9 +152,10 @@ class SketchfabService:
             raise SketchfabError(missing)
         if response.status_code != 200:
             raise SketchfabError(f"{failure}{response.status_code}")
-        return response.json()
+        data: object = response.json()
+        return _json_object(data) if data is not None else None
 
-    def get_sketchfab_status(self):
+    def get_sketchfab_status(self) -> dict[str, object]:
         if not self._enabled():
             return {
                 "enabled": False,
@@ -143,7 +178,7 @@ class SketchfabService:
                     "enabled": False,
                     "message": f"Sketchfab API key seems invalid. Status code: {response.status_code}",
                 }
-            username = response.json().get("username", "Unknown user")
+            username = _json_object(response.json()).get("username", "Unknown user")
             return {
                 "enabled": True,
                 "message": f"Sketchfab integration is enabled and ready to use. Logged in as: {username}",
@@ -161,10 +196,14 @@ class SketchfabService:
             }
 
     def search_sketchfab_models(
-        self, query, categories=None, count=20, downloadable=True
-    ):
+        self,
+        query: str,
+        categories: str | None = None,
+        count: int = 20,
+        downloadable: bool = True,
+    ) -> dict[str, object]:
         try:
-            params = {
+            params: dict[str, str | int | bool] = {
                 "type": "models",
                 "q": query,
                 "count": count,
@@ -193,22 +232,27 @@ class SketchfabService:
             logger.exception("Error searching Sketchfab models")
             return {"error": str(error)}
 
-    def get_sketchfab_model_preview(self, uid):
+    def get_sketchfab_model_preview(self, uid: str) -> dict[str, object]:
         try:
             data = self._request_json(
                 f"models/{uid}",
                 "Failed to get model info: ",
                 missing=f"Model not found: {uid}",
             )
-            thumbnails = data.get("thumbnails", {}).get("images", [])
-            if not thumbnails:
+            if data is None:
+                raise SketchfabError("Received empty response from Sketchfab API")
+            images = _json_object(data.get("thumbnails", {})).get("images", [])
+            if not images:
                 raise SketchfabError("No thumbnail available for this model")
+            if not isinstance(images, list):
+                raise SketchfabError("Unexpected thumbnail list from Sketchfab API")
+            thumbnails = [_json_object(item) for item in images]
             thumbnail = next(
-                (item for item in thumbnails if 400 <= item.get("width", 0) <= 800),
+                (item for item in thumbnails if _medium_thumbnail(item)),
                 thumbnails[0],
             )
             url = thumbnail.get("url")
-            if not url:
+            if not isinstance(url, str) or not url:
                 raise SketchfabError("Thumbnail URL not found")
             response = _http_get(url, timeout=30)
             if response.status_code != 200:
@@ -223,7 +267,7 @@ class SketchfabService:
                 if "png" in content_type or url.endswith(".png")
                 else "jpeg",
                 "model_name": data.get("name", "Unknown"),
-                "author": data.get("user", {}).get("username", "Unknown"),
+                "author": _json_object(data.get("user", {})).get("username", "Unknown"),
                 "uid": uid,
                 "thumbnail_width": thumbnail.get("width"),
                 "thumbnail_height": thumbnail.get("height"),
@@ -236,7 +280,9 @@ class SketchfabService:
             logger.exception("Error getting Sketchfab model preview")
             return {"error": f"Failed to get model preview: {error!s}"}
 
-    def download_sketchfab_model(self, uid, normalize_size=False, target_size=1.0):
+    def download_sketchfab_model(
+        self, uid: str, normalize_size: bool = False, target_size: float = 1.0
+    ) -> dict[str, object]:
         try:
             data = self._request_json(
                 f"models/{uid}/download", "Download request failed with status code "
@@ -250,8 +296,8 @@ class SketchfabService:
                 raise SketchfabError(
                     f"No gltf download URL available for this model. Response: {data}"
                 )
-            url = gltf.get("url")
-            if not url:
+            url = _json_object(gltf).get("url")
+            if not isinstance(url, str) or not url:
                 raise SketchfabError(
                     "No download URL available for this model. Make sure the model is downloadable and you have access."
                 )

@@ -19,12 +19,40 @@ cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }]
 python_files = ["test_*.py"]
 testpaths = ["tests"]
 
+[tool.ty.environment]
+python-version = "3.11"
+python-platform = "all"
+
+[tool.ty.src]
+include = ["extension", "tests", "tools"]
+
+[tool.ty.rules]
+possibly-missing-attribute = "error"
+possibly-missing-import = "error"
+possibly-unresolved-reference = "error"
+invalid-argument-type = "error"
+unused-ignore-comment = "error"
+ignore-comment-unknown-rule = "error"
+
+[tool.ty.terminal]
+error-on-warning = true
+
+[tool.ruff.lint]
+extend-select = ["ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "ANN204", "ANN205", "ANN206"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
+
 [dependency-groups]
 addon = [
     "requests>=2.34.2",
 ]
 dev = [
     { include-group = "addon" },
+    "fake-bpy-module-5-2>=20260730",
+    "numpy>=2.4.6",
     "pytest>=9.1.1",
     "ruff>=0.16.6",
+    "ty>=0.0.83",
+    "types-requests>=2.33.0.20260906",
 ]

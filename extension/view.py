@@ -1,19 +1,33 @@
+from __future__ import annotations
+
 import base64
 import logging
 import math
 import os
 import tempfile
+from collections.abc import Sequence
+from contextlib import AbstractContextManager
 from itertools import product
+from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 import bpy
 from mathutils import Vector
 
+from .context import current_scene, current_view_layer
 from .geometry import evaluated_geometry
+
+if TYPE_CHECKING:
+    from bpy.stub_internal.rna_enums import ImageTypeAllItems
 
 logger = logging.getLogger(__name__)
 
 
-def _number(name, value, low, high):
+class CaptureOptions(TypedDict, total=False):
+    viewport_index: int
+    camera_only: bool
+
+
+def _number(name: str, value: float | None, low: float, high: float) -> None:
     if value is not None and (
         type(value) not in (int, float)
         or not math.isfinite(value)
@@ -22,17 +36,21 @@ def _number(name, value, low, high):
         raise ValueError(f"{name} must be a number between {low} and {high}")
 
 
-def _boolean(name, value):
+def _boolean(name: str, value: bool | None) -> None:
     if value is not None and type(value) is not bool:
         raise ValueError(f"{name} must be a boolean")
 
 
-def _choice(name, value, choices):
+def _choice(name: str, value: str | None, choices: Sequence[str]) -> None:
     if value is not None and (not isinstance(value, str) or value not in choices):
         raise ValueError(f"{name} must be one of {', '.join(choices)}")
 
 
-def _targets(object_names=None, frame=None, viewport=None):
+def _targets(
+    object_names: list[str] | None = None,
+    frame: str | None = None,
+    viewport: bpy.types.SpaceView3D | None = None,
+) -> list[bpy.types.Object]:
     if object_names is not None:
         if (
             not isinstance(object_names, list)
@@ -44,7 +62,7 @@ def _targets(object_names=None, frame=None, viewport=None):
             )
         objects = []
         for name in dict.fromkeys(object_names):
-            obj = bpy.context.view_layer.objects.get(name)
+            obj = current_view_layer().objects.get(name)
             if obj is None:
                 raise ValueError(f"Object not in the active view layer: {name}")
             if viewport is not None and not obj.visible_get(viewport=viewport):
@@ -53,7 +71,7 @@ def _targets(object_names=None, frame=None, viewport=None):
     else:
         objects = [
             obj
-            for obj in bpy.context.view_layer.objects
+            for obj in current_view_layer().objects
             if obj.visible_get(viewport=viewport)
             and (frame == "ALL" or obj.select_get())
         ]
@@ -62,7 +80,9 @@ def _targets(object_names=None, frame=None, viewport=None):
     return objects
 
 
-def _points(objects, padding):
+def _points(
+    objects: Sequence[bpy.types.Object], padding: float
+) -> tuple[list[Vector], Vector]:
     points = []
     for obj in objects:
         bounds = evaluated_geometry(obj)["world_bounding_box"]
@@ -76,8 +96,11 @@ def _points(objects, padding):
     return [center + (point - center) * padding for point in points], center
 
 
-def camera_info(obj):
-    data = obj.data
+def camera_info(obj: bpy.types.Object) -> dict[str, object]:
+    data = cast("bpy.types.Camera", obj.data)
+    dof = data.dof
+    if dof is None:
+        raise ValueError("Camera has no depth-of-field settings")
     return {
         "data_name": data.name,
         "projection": data.type,
@@ -93,31 +116,29 @@ def camera_info(obj):
         "shift_y": data.shift_y,
         "clip_start": data.clip_start,
         "clip_end": data.clip_end,
-        "is_active": bpy.context.scene.camera == obj,
+        "is_active": current_scene().camera == obj,
         "dof": {
-            "use_dof": data.dof.use_dof,
-            "focus_object": data.dof.focus_object.name
-            if data.dof.focus_object
-            else None,
-            "focus_distance": data.dof.focus_distance,
-            "aperture_fstop": data.dof.aperture_fstop,
+            "use_dof": dof.use_dof,
+            "focus_object": dof.focus_object.name if dof.focus_object else None,
+            "focus_distance": dof.focus_distance,
+            "aperture_fstop": dof.aperture_fstop,
         },
     }
 
 
 def set_camera(
-    object_name,
-    projection=None,
-    lens=None,
-    ortho_scale=None,
-    shift_x=None,
-    shift_y=None,
-    clip_start=None,
-    clip_end=None,
-    object_names=None,
-    padding=1.1,
-    make_active=False,
-):
+    object_name: str,
+    projection: Literal["PERSP", "ORTHO"] | None = None,
+    lens: float | None = None,
+    ortho_scale: float | None = None,
+    shift_x: float | None = None,
+    shift_y: float | None = None,
+    clip_start: float | None = None,
+    clip_end: float | None = None,
+    object_names: list[str] | None = None,
+    padding: float = 1.1,
+    make_active: bool = False,
+) -> dict[str, object]:
     if not isinstance(object_name, str) or not object_name:
         raise ValueError("object_name must be a non-empty string")
     _choice("projection", projection, ("PERSP", "ORTHO"))
@@ -132,10 +153,10 @@ def set_camera(
     ):
         _number(name, value, low, high)
     _boolean("make_active", make_active)
-    obj = bpy.context.scene.objects.get(object_name)
+    obj = current_scene().objects.get(object_name)
     if obj is None or obj.type != "CAMERA":
         raise ValueError(f"Camera not found in the active scene: {object_name}")
-    data = obj.data
+    data = cast("bpy.types.Camera", obj.data)
     if not obj.is_editable or not data.is_editable:
         raise ValueError("Camera and camera data must be editable")
     if (clip_start if clip_start is not None else data.clip_start) >= (
@@ -196,8 +217,8 @@ def set_camera(
         matrix.translation = location
         obj.matrix_world = matrix
     if make_active:
-        bpy.context.scene.camera = obj
-    bpy.context.view_layer.update()
+        current_scene().camera = obj
+    current_view_layer().update()
     return {
         "object_name": obj.name,
         "camera": camera_info(obj),
@@ -206,18 +227,26 @@ def set_camera(
     }
 
 
-def viewport_context(viewport_index=0):
+def viewport_context(
+    viewport_index: int = 0,
+) -> tuple[bpy.types.Window, bpy.types.Area, bpy.types.Region]:
     if type(viewport_index) is not int or viewport_index < 0:
         raise ValueError("viewport_index must be a non-negative integer")
     if bpy.app.background:
         raise ValueError("Viewport controls require a Blender window")
-    windows = list(bpy.context.window_manager.windows)
+    manager = bpy.context.window_manager
+    if manager is None:
+        raise ValueError("Viewport controls require a Blender window manager")
+    windows = list(manager.windows)
     if bpy.context.window in windows:
         windows.remove(bpy.context.window)
         windows.insert(0, bpy.context.window)
     viewports = []
     for window in windows:
-        for area in window.screen.areas:
+        screen = window.screen
+        if screen is None:
+            continue
+        for area in screen.areas:
             if area.type != "VIEW_3D":
                 continue
             for region in area.regions:
@@ -228,24 +257,26 @@ def viewport_context(viewport_index=0):
             f"Viewport {viewport_index} unavailable; found {len(viewports)} 3D viewports"
         )
     window, area, region = viewports[viewport_index]
-    if area.spaces.active.region_quadviews:
+    if cast("bpy.types.SpaceView3D", area.spaces.active).region_quadviews:
         raise ValueError(
             "Quad view is not supported; switch this area to a single view"
         )
     return window, area, region
 
 
-def viewport_info(area, viewport_index):
-    space = area.spaces.active
+def viewport_info(area: bpy.types.Area, viewport_index: int) -> dict[str, object]:
+    space = cast("bpy.types.SpaceView3D", area.spaces.active)
     region = space.region_3d
-    camera = space.camera if space.use_local_camera else bpy.context.scene.camera
+    if region is None:
+        raise ValueError("Viewport has no 3D region")
+    camera = space.camera if space.use_local_camera else current_scene().camera
     return {
         "viewport_index": viewport_index,
-        "scene": bpy.context.scene.name,
-        "view_layer": bpy.context.view_layer.name,
+        "scene": current_scene().name,
+        "view_layer": current_view_layer().name,
         "projection": region.view_perspective,
-        "location": list(region.view_location),
-        "rotation": list(region.view_rotation),
+        "location": list(region.view_location[:]),
+        "rotation": list(region.view_rotation[:]),
         "distance": region.view_distance,
         "camera_zoom": region.view_camera_zoom,
         "camera": camera.name if camera else None,
@@ -256,18 +287,18 @@ def viewport_info(area, viewport_index):
 
 
 def set_viewport(
-    viewport_index=0,
-    view=None,
-    projection=None,
-    frame=None,
-    object_names=None,
-    padding=1.1,
-    distance=None,
-    camera_zoom=None,
-    shading=None,
-    overlays=None,
-    gizmos=None,
-):
+    viewport_index: int = 0,
+    view: str | None = None,
+    projection: Literal["PERSP", "ORTHO"] | None = None,
+    frame: str | None = None,
+    object_names: list[str] | None = None,
+    padding: float = 1.1,
+    distance: float | None = None,
+    camera_zoom: float | None = None,
+    shading: Literal["WIREFRAME", "SOLID", "MATERIAL", "RENDERED"] | None = None,
+    overlays: bool | None = None,
+    gizmos: bool | None = None,
+) -> dict[str, object]:
     directions = {
         "FRONT": (0, -1, 0),
         "BACK": (0, 1, 0),
@@ -296,9 +327,15 @@ def set_viewport(
             "Camera view cannot be combined with projection, framing, or distance"
         )
     window, area, region = viewport_context(viewport_index)
-    with bpy.context.temp_override(window=window, area=area, region=region):
-        space = area.spaces.active
+    # Blender's stubs omit ContextTempOverride's context-manager methods.
+    with cast(
+        AbstractContextManager[object],
+        bpy.context.temp_override(window=window, area=area, region=region),
+    ):
+        space = cast("bpy.types.SpaceView3D", area.spaces.active)
         r3d = space.region_3d
+        if r3d is None:
+            raise ValueError("Viewport has no 3D region")
         perspective = projection or (
             "CAMERA"
             if view == "CAMERA"
@@ -319,11 +356,11 @@ def set_viewport(
         elif camera_zoom is not None:
             raise ValueError("camera_zoom requires camera view")
         objects = _targets(object_names, frame, space) if framing else []
-        points, center = _points(objects, padding) if framing else (None, None)
-        if view in directions:
+        if view is not None and view in directions:
             r3d.view_rotation = (-Vector(directions[view])).to_track_quat("-Z", "Y")
         r3d.view_perspective = perspective
         if framing:
+            points, center = _points(objects, padding)
             radius = max(max((point - center).length for point in points), 0.01)
             r3d.view_location = center
             r3d.view_distance = 1
@@ -350,21 +387,33 @@ def set_viewport(
         }
 
 
-def capture_viewport(max_size, filepath, format, viewport_index=0, camera_only=False):
+def capture_viewport(
+    max_size: int,
+    filepath: str,
+    format: str,
+    viewport_index: int = 0,
+    camera_only: bool = False,
+) -> dict[str, object]:
     window, area, region = viewport_context(viewport_index)
-    with bpy.context.temp_override(window=window, area=area, region=region):
-        space = area.spaces.active
+    with cast(
+        AbstractContextManager[object],
+        bpy.context.temp_override(window=window, area=area, region=region),
+    ):
+        space = cast("bpy.types.SpaceView3D", area.spaces.active)
         r3d = space.region_3d
+        if r3d is None:
+            raise ValueError("Viewport has no 3D region")
         r3d.update()
         scene = window.scene
         camera = scene.camera if camera_only else None
         if camera_only and (
-            camera is None or camera.data.type not in {"PERSP", "ORTHO"}
+            camera is None
+            or cast("bpy.types.Camera", camera.data).type not in {"PERSP", "ORTHO"}
         ):
             raise ValueError(
                 "Camera capture requires an active PERSP or ORTHO scene camera"
             )
-        if camera_only:
+        if camera is not None:
             render = scene.render
             source_width = render.resolution_x * render.pixel_aspect_x
             source_height = render.resolution_y * render.pixel_aspect_y
@@ -403,7 +452,7 @@ def capture_viewport(max_size, filepath, format, viewport_index=0, camera_only=F
                         do_color_management=True,
                     )
                     buffer = offscreen.texture_color.read()
-                    buffer.dimensions = width * height * 4
+                    buffer.dimensions = [width * height * 4]
                     pixels = np.asarray(buffer, dtype=np.float32) / 255.0
                 finally:
                     offscreen.free()
@@ -430,7 +479,7 @@ def capture_viewport(max_size, filepath, format, viewport_index=0, camera_only=F
                 height = max(1, round(source_height * scale))
                 image.scale(width, height)
             image.filepath_raw = filepath
-            image.file_format = format.upper()
+            image.file_format = cast("ImageTypeAllItems", format.upper())
             image.save()
         finally:
             if image is not None:
@@ -448,19 +497,19 @@ def capture_viewport(max_size, filepath, format, viewport_index=0, camera_only=F
 
 
 def get_viewport_screenshot(
-    max_size=800,
-    filepath=None,
-    format="png",
-    viewport_index=0,
-    camera_only=False,
-):
+    max_size: int = 800,
+    filepath: str | None = None,
+    format: str = "png",
+    viewport_index: int = 0,
+    camera_only: bool = False,
+) -> dict[str, object]:
     if type(max_size) is not int or not 1 <= max_size <= 4096:
         return {"error": "max_size must be an integer between 1 and 4096"}
     if type(viewport_index) is not int or viewport_index < 0:
         return {"error": "viewport_index must be a non-negative integer"}
     if type(camera_only) is not bool:
         return {"error": "camera_only must be a boolean"}
-    options = (
+    options: CaptureOptions = (
         {"viewport_index": viewport_index, "camera_only": camera_only}
         if viewport_index or camera_only
         else {}
@@ -479,12 +528,12 @@ def get_viewport_screenshot(
 
 
 def _save_viewport_screenshot(
-    max_size=800,
-    filepath=None,
-    format="png",
-    viewport_index=0,
-    camera_only=False,
-):
+    max_size: int = 800,
+    filepath: str | None = None,
+    format: str = "png",
+    viewport_index: int = 0,
+    camera_only: bool = False,
+) -> dict[str, object]:
     try:
         if not filepath:
             return {"error": "No filepath provided"}

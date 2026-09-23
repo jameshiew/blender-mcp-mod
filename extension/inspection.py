@@ -1,27 +1,68 @@
+from __future__ import annotations
+
 import math
 from collections import Counter
+from collections.abc import Callable, Iterator, Sequence
 from itertools import islice
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    Protocol,
+    TypeAlias,
+    TypeVar,
+    cast,
+    overload,
+)
 
 import bpy
+
+from .context import current_scene
+
+T = TypeVar("T")
+if TYPE_CHECKING:
+
+    class ModifierProperties(Protocol):
+        inputs: object
+
+    AnimationEntry: TypeAlias = (
+        tuple[Literal["NLA_TRACK"], dict[str, object], bpy.types.NlaTrack]
+        | tuple[Literal["NLA_STRIP"], dict[str, object], bpy.types.NlaStrip]
+        | tuple[
+            Literal[
+                "ACTION_CHANNEL", "DRIVER", "NLA_CONTROL_CHANNEL", "NLA_ACTION_CHANNEL"
+            ],
+            dict[str, object],
+            bpy.types.FCurve,
+        ]
+    )
 
 DETAIL_LIMIT = 64
 VALUE_LIMIT = 16
 TEXT_LIMIT = 2048
 
 
-def _name(value, field):
+def _name(value: str, field: str) -> None:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{field} must be a non-empty string")
 
 
-def _pagination(offset, limit):
+def _pagination(offset: int, limit: int) -> None:
     if type(offset) is not int or offset < 0:
         raise ValueError("offset must be a non-negative integer")
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError("limit must be an integer from 1 to 100")
 
 
-def _ref(value):
+@overload
+def _ref(value: bpy.types.ID) -> dict[str, object]: ...
+
+
+@overload
+def _ref(value: None) -> None: ...
+
+
+def _ref(value: bpy.types.ID | None) -> dict[str, object] | None:
     if value is None:
         return None
     return {
@@ -31,7 +72,7 @@ def _ref(value):
     }
 
 
-def _value(value):
+def _value(value: Any) -> object:
     if value is None or isinstance(value, (bool, int)):
         return value
     if isinstance(value, float):
@@ -57,7 +98,7 @@ def _value(value):
     )
 
 
-def _details_omitted(value):
+def _details_omitted(value: object) -> bool:
     if isinstance(value, dict):
         return bool(
             value.get("details_omitted") or value.get("omitted") or value.get("errors")
@@ -67,10 +108,17 @@ def _details_omitted(value):
     return False
 
 
-def _page(items, offset, limit, describe=lambda item: item, *, pageable=True):
+def _page(
+    items: Sequence[T],
+    offset: int,
+    limit: int,
+    describe: Callable[[T], object] | None = None,
+    *,
+    pageable: bool = True,
+) -> dict[str, object]:
     total = len(items)
     end = min(offset + limit, total)
-    described = [describe(item) for item in items[offset:end]]
+    described = [describe(item) if describe else item for item in items[offset:end]]
     remaining = end < total
     more = remaining and pageable
     return {
@@ -84,12 +132,21 @@ def _page(items, offset, limit, describe=lambda item: item, *, pageable=True):
     }
 
 
-def _limited(items, offset, limit, describe=lambda item: item):
+def _limited(
+    items: Sequence[T],
+    offset: int,
+    limit: int,
+    describe: Callable[[T], object] | None = None,
+) -> dict[str, object]:
     return _page(items, offset, limit, describe, pageable=False)
 
 
-def _settings(value, skip=(), depth=1):
-    settings, omitted, errors = {}, [], {}
+def _settings(
+    value: bpy.types.bpy_struct, skip: Sequence[str] = (), depth: int = 1
+) -> dict[str, object]:
+    settings: dict[str, object] = {}
+    omitted: list[str] = []
+    errors: dict[str, str] = {}
     for prop in value.bl_rna.properties:
         key = prop.identifier
         if key == "rna_type" or key in skip:
@@ -121,7 +178,7 @@ def _settings(value, skip=(), depth=1):
     }
 
 
-def _slot(slot):
+def _slot(slot: bpy.types.ActionSlot | None) -> dict[str, object] | None:
     return (
         {"identifier": slot.identifier, "target_id_type": slot.target_id_type}
         if slot
@@ -129,12 +186,17 @@ def _slot(slot):
     )
 
 
-def _action_curves(action, slot):
+def _action_curves(
+    action: bpy.types.Action | None, slot: bpy.types.ActionSlot | None
+) -> Iterator[tuple[bpy.types.FCurve, dict[str, object]]]:
     if action is None or slot is None:
         return
     for layer_index, layer in enumerate(action.layers):
         for strip_index, strip in enumerate(layer.strips):
-            for bag in getattr(strip, "channelbags", ()):
+            bags: Sequence[bpy.types.ActionChannelbag] = getattr(
+                strip, "channelbags", ()
+            )
+            for bag in bags:
                 if bag.slot_handle == slot.handle:
                     for curve in bag.fcurves:
                         yield (
@@ -149,17 +211,17 @@ def _action_curves(action, slot):
                         )
 
 
-def _animation_entries(owner):
-    animation = getattr(owner, "animation_data", None)
+def _animation_entries(owner: bpy.types.ID) -> list[AnimationEntry]:
+    animation: bpy.types.AnimData | None = getattr(owner, "animation_data", None)
     if animation is None:
         return []
-    entries = [
+    entries: list[AnimationEntry] = [
         ("ACTION_CHANNEL", context, curve)
         for curve, context in _action_curves(animation.action, animation.action_slot)
     ]
     entries.extend(("DRIVER", {}, curve) for curve in animation.drivers)
     for track_index, track in enumerate(animation.nla_tracks):
-        context = {"track": track.name, "track_index": track_index}
+        context: dict[str, object] = {"track": track.name, "track_index": track_index}
         entries.append(("NLA_TRACK", context, track))
         pending = [
             (strip, [index]) for index, strip in reversed(list(enumerate(track.strips)))
@@ -184,10 +246,24 @@ def _animation_entries(owner):
     return entries
 
 
-def _animation_overview(owner, entries=None):
+@overload
+def _animation_overview(
+    owner: bpy.types.ID, entries: list[AnimationEntry] | None = None
+) -> dict[str, object]: ...
+
+
+@overload
+def _animation_overview(
+    owner: None, entries: list[AnimationEntry] | None = None
+) -> None: ...
+
+
+def _animation_overview(
+    owner: bpy.types.ID | None, entries: list[AnimationEntry] | None = None
+) -> dict[str, object] | None:
     if owner is None:
         return None
-    animation = getattr(owner, "animation_data", None)
+    animation: bpy.types.AnimData | None = getattr(owner, "animation_data", None)
     entries = _animation_entries(owner) if entries is None else entries
     return {
         "owner": _ref(owner),
@@ -202,7 +278,7 @@ def _animation_overview(owner, entries=None):
     }
 
 
-def _curve_info(curve):
+def _curve_info(curve: bpy.types.FCurve) -> dict[str, object]:
     key_count, sample_count = len(curve.keyframe_points), len(curve.sampled_points)
     return {
         "data_path": _value(curve.data_path),
@@ -228,14 +304,16 @@ def _curve_info(curve):
     }
 
 
-def _describe_animation(entry):
+def _describe_animation(entry: AnimationEntry) -> dict[str, object]:
     kind, context, value = entry
-    result = {"kind": kind, **context}
+    result: dict[str, object] = {"kind": kind, **context}
     if kind == "NLA_TRACK":
+        value = cast("bpy.types.NlaTrack", value)
         result.update(
             mute=value.mute, is_solo=value.is_solo, strip_count=len(value.strips)
         )
     elif kind == "NLA_STRIP":
+        value = cast("bpy.types.NlaStrip", value)
         result.update(
             type=value.type,
             frame_range=_value([value.frame_start, value.frame_end]),
@@ -261,9 +339,12 @@ def _describe_animation(entry):
         ):
             result[field] = _value(getattr(value, field))
     else:
+        value = cast("bpy.types.FCurve", value)
         result.update(_curve_info(value))
         if kind == "DRIVER":
             driver = value.driver
+            if driver is None:
+                raise ValueError("Driver channel has no driver")
             result["driver"] = {
                 "type": driver.type,
                 "expression": _value(driver.expression),
@@ -283,7 +364,7 @@ def _describe_animation(entry):
     return result
 
 
-def _owner(data_type, data_name):
+def _owner(data_type: str, data_name: str) -> bpy.types.ID:
     _name(data_name, "data_name")
     collections = {
         "OBJECT": "objects",
@@ -312,21 +393,23 @@ def _owner(data_type, data_name):
     return owner
 
 
-def animation_info(data_name, data_type="OBJECT", offset=0, limit=20):
+def animation_info(
+    data_name: str, data_type: str = "OBJECT", offset: int = 0, limit: int = 20
+) -> dict[str, object]:
     _pagination(offset, limit)
     owner = _owner(data_type, data_name)
     entries = _animation_entries(owner)
     return {
         **_animation_overview(owner, entries),
         "data_type": data_type,
-        "frame": bpy.context.scene.frame_current,
+        "frame": current_scene().frame_current,
         "entries": _page(entries, offset, limit, _describe_animation),
         "scope": "Assigned action slots, drivers, and NLA tracks/strips. Channel ranges use action-local frames; NLA strip ranges use scene frames. Summaries do not evaluate drivers or change the current frame.",
     }
 
 
-def _socket_info(socket, index):
-    result = {
+def _socket_info(socket: bpy.types.NodeSocket, index: int) -> dict[str, object]:
+    result: dict[str, object] = {
         "index": index,
         "identifier": socket.identifier,
         "name": socket.name,
@@ -340,8 +423,8 @@ def _socket_info(socket, index):
     return result
 
 
-def _node_info(node):
-    result = {
+def _node_info(node: bpy.types.Node) -> dict[str, object]:
+    result: dict[str, object] = {
         "name": node.name,
         "type": node.bl_idname,
         "label": node.label,
@@ -360,17 +443,20 @@ def _node_info(node):
             lambda pair: _socket_info(pair[1], pair[0]),
         ),
     }
-    if getattr(node, "image", None):
+    image: bpy.types.Image | None = getattr(node, "image", None)
+    if image is not None:
         result["image"] = {
-            **_ref(node.image),
-            "filepath": node.image.filepath,
-            "source": node.image.source,
-            "colorspace": node.image.colorspace_settings.name,
+            **_ref(image),
+            "filepath": image.filepath,
+            "source": image.source,
+            "colorspace": image.colorspace_settings.name
+            if image.colorspace_settings
+            else None,
         }
-    if getattr(node, "node_tree", None):
-        result["node_group"] = _ref(node.node_tree)
-    if hasattr(node, "color_ramp"):
-        ramp = node.color_ramp
+    if tree := getattr(node, "node_tree", None):
+        result["node_group"] = _ref(tree)
+    ramp: bpy.types.ColorRamp | None = getattr(node, "color_ramp", None)
+    if ramp is not None:
         result["color_ramp"] = {
             "interpolation": ramp.interpolation,
             "color_mode": ramp.color_mode,
@@ -385,23 +471,39 @@ def _node_info(node):
     return result
 
 
-def _link_info(link):
+def _link_info(link: bpy.types.NodeLink) -> dict[str, object]:
     return {
-        "from_node": link.from_node.name,
-        "from_socket": link.from_socket.identifier,
-        "to_node": link.to_node.name,
-        "to_socket": link.to_socket.identifier,
+        "from_node": link.from_node.name if link.from_node else None,
+        "from_socket": link.from_socket.identifier if link.from_socket else None,
+        "to_node": link.to_node.name if link.to_node else None,
+        "to_socket": link.to_socket.identifier if link.to_socket else None,
         "is_muted": link.is_muted,
         "is_valid": link.is_valid,
     }
 
 
-def _tree_info(tree, offset, limit):
+@overload
+def _tree_info(
+    tree: bpy.types.NodeTree, offset: int, limit: int
+) -> dict[str, object]: ...
+
+
+@overload
+def _tree_info(tree: None, offset: int, limit: int) -> None: ...
+
+
+def _tree_info(
+    tree: bpy.types.NodeTree | None, offset: int, limit: int
+) -> dict[str, object] | None:
     if tree is None:
         return None
     nodes = sorted(tree.nodes, key=lambda node: node.name)
     page_names = {node.name for node in nodes[offset : offset + limit]}
-    links = [link for link in tree.links if link.to_node.name in page_names]
+    links = [
+        link
+        for link in tree.links
+        if link.to_node is not None and link.to_node.name in page_names
+    ]
     return {
         "name": tree.name,
         "type": tree.bl_idname,
@@ -414,7 +516,9 @@ def _tree_info(tree, offset, limit):
     }
 
 
-def material_info(material_name, offset=0, limit=20):
+def material_info(
+    material_name: str, offset: int = 0, limit: int = 20
+) -> dict[str, object]:
     _name(material_name, "material_name")
     _pagination(offset, limit)
     material = bpy.data.materials.get(material_name)
@@ -429,13 +533,28 @@ def material_info(material_name, offset=0, limit=20):
     }
 
 
-def node_group_info(node_group_name, offset=0, limit=20):
+def _interface_sockets(
+    tree: bpy.types.NodeTree,
+) -> list[bpy.types.NodeTreeInterfaceSocket]:
+    interface = tree.interface
+    if interface is None:
+        return []
+    return [
+        cast("bpy.types.NodeTreeInterfaceSocket", item)
+        for item in interface.items_tree
+        if item.item_type == "SOCKET"
+    ]
+
+
+def node_group_info(
+    node_group_name: str, offset: int = 0, limit: int = 20
+) -> dict[str, object]:
     _name(node_group_name, "node_group_name")
     _pagination(offset, limit)
     tree = bpy.data.node_groups.get(node_group_name)
     if tree is None:
         raise ValueError(f"Node group not found: {node_group_name}")
-    sockets = [item for item in tree.interface.items_tree if item.item_type == "SOCKET"]
+    sockets = _interface_sockets(tree)
     return {
         **_ref(tree),
         **_tree_info(tree, offset, limit),
@@ -454,8 +573,8 @@ def node_group_info(node_group_name, offset=0, limit=20):
     }
 
 
-def _modifier_info(modifier, index):
-    result = {
+def _modifier_info(modifier: bpy.types.Modifier, index: int) -> dict[str, object]:
+    result: dict[str, object] = {
         "name": modifier.name,
         "type": modifier.type,
         "index": index,
@@ -467,21 +586,27 @@ def _modifier_info(modifier, index):
             modifier, skip=bpy.types.Modifier.bl_rna.properties.keys()
         ),
     }
-    if modifier.type == "NODES" and modifier.node_group:
+    node_group: bpy.types.NodeTree | None = getattr(modifier, "node_group", None)
+    if modifier.type == "NODES" and node_group:
         inputs = [
-            item
-            for item in modifier.node_group.interface.items_tree
-            if item.item_type == "SOCKET" and item.in_out == "INPUT"
+            item for item in _interface_sockets(node_group) if item.in_out == "INPUT"
         ]
 
-        def input_info(item):
+        def input_info(item: bpy.types.NodeTreeInterfaceSocket) -> dict[str, object]:
             key = item.identifier
-            result = {
+            result: dict[str, object] = {
                 "name": item.name,
                 "identifier": key,
                 "socket_type": item.socket_type,
             }
-            value = getattr(modifier.properties.inputs, key, None)
+            value = getattr(
+                cast(
+                    "ModifierProperties",
+                    cast("bpy.types.NodesModifier", modifier).properties,
+                ).inputs,
+                key,
+                None,
+            )
             if value is not None:
                 for field in ("value", "type", "attribute_name"):
                     if hasattr(value, field):
@@ -490,12 +615,12 @@ def _modifier_info(modifier, index):
                     result["use_attribute"] = value.type == "ATTRIBUTE"
             return result
 
-        result["node_group"] = _ref(modifier.node_group)
+        result["node_group"] = _ref(node_group)
         result["inputs"] = _limited(inputs, 0, DETAIL_LIMIT, input_info)
     return result
 
 
-def modifier_info(object_name, modifier_name):
+def modifier_info(object_name: str, modifier_name: str) -> dict[str, object]:
     _name(object_name, "object_name")
     _name(modifier_name, "modifier_name")
     obj = bpy.data.objects.get(object_name)
@@ -505,17 +630,21 @@ def modifier_info(object_name, modifier_name):
         if modifier.name == modifier_name:
             return {
                 "object": _ref(obj),
-                "frame": bpy.context.scene.frame_current,
+                "frame": current_scene().frame_current,
                 **_modifier_info(modifier, index),
             }
     raise ValueError(f"Modifier not found on {object_name}: {modifier_name}")
 
 
-def object_details(obj):
-    def material_slot(pair):
+def object_details(obj: bpy.types.Object) -> dict[str, object]:
+    def material_slot(pair: tuple[int, bpy.types.MaterialSlot]) -> dict[str, object]:
         index, slot = pair
         material = slot.material
-        result = {"index": index, "link": slot.link, "material": _ref(material)}
+        result: dict[str, object] = {
+            "index": index,
+            "link": slot.link,
+            "material": _ref(material),
+        }
         if material:
             result.update(
                 use_nodes=material.use_nodes,

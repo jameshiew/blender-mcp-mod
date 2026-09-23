@@ -31,12 +31,27 @@ class Process:
         return self.code
 
 
+class Scene(SimpleNamespace):
+    __hash__ = object.__hash__
+    __eq__ = object.__eq__
+
+
+@pytest.mark.parametrize("closed", [False, True])
+def test_export_without_render_storage_reports_missing_job(renders, tmp_path, closed):
+    if closed:
+        renders.manager.start()
+        renders.manager.close()
+    with pytest.raises(ValueError, match="Unknown or expired render job"):
+        renders.manager.export("missing", str(tmp_path / "render.png"))
+    assert not (tmp_path / "render.png").exists()
+
+
 @pytest.fixture
 def renders(monkeypatch):
     addon = _load_addon(monkeypatch)
     module = addon.render_jobs
     bpy = module.bpy
-    scene = type("Scene", (), {})()
+    scene = Scene()
     scene.name = "植物 • Scene"
     scene.blendermcp_use_sketchfab = False
     scene.camera = SimpleNamespace(type="CAMERA")

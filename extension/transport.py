@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 import json
 import logging
+import os
 import queue
 import socket
+import ssl
 import threading
 import time
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 
 import bpy
@@ -14,24 +19,31 @@ logger = logging.getLogger(__name__)
 
 
 class CommandServer:
-    def __init__(self, host="127.0.0.1", port=9876, config_dir=None):
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 9876,
+        config_dir: str | os.PathLike[str] | None = None,
+    ) -> None:
         self.host = host
         self.port = port
         self.running = False
-        self.socket = None
-        self.server_thread = None
+        self.socket: socket.socket | None = None
+        self.server_thread: threading.Thread | None = None
         self.config_dir = config_dir
-        self.poll = lambda: None
-        self._tls_context = None
+        self.poll: Callable[[], None] = lambda: None
+        self._tls_context: ssl.SSLContext | None = None
         self.last_error = ""
         self.handshake_timeout = 5.0
         self.max_clients = 16
         # Only the main-thread timer may execute commands or access Blender data.
-        self.command_queue = queue.Queue()
-        self._clients = set()
+        self.command_queue: queue.Queue[
+            tuple[Mapping[str, object], queue.Queue[bytes]]
+        ] = queue.Queue()
+        self._clients: set[ssl.SSLSocket] = set()
         self._clients_lock = threading.Lock()
 
-    def start(self):
+    def start(self) -> None:
         if bpy.app.background:
             print(
                 "BlenderMCP: cannot start server in background mode (blender -b) - commands would never execute\n"
@@ -68,7 +80,7 @@ class CommandServer:
             logger.exception("Failed to start server")
             self.stop()
 
-    def stop(self):
+    def stop(self) -> None:
         self.running = False
         try:
             if bpy.app.timers.is_registered(self._drain_command_queue):
@@ -107,20 +119,26 @@ class CommandServer:
 
         print("BlenderMCP server stopped")
 
-    def _server_loop(self):
+    def execute_command(self, command: Mapping[str, object]) -> Mapping[str, object]:
+        raise NotImplementedError
+
+    def _server_loop(self) -> None:
         print("Server thread started")
-        self.socket.settimeout(1.0)  # Timeout to allow for stopping
+        listener, tls_context = self.socket, self._tls_context
+        if listener is None or tls_context is None:
+            return
+        listener.settimeout(1.0)  # Timeout to allow for stopping
 
         while self.running:
             try:
                 try:
-                    client, _address = self.socket.accept()
+                    client, _address = listener.accept()
                     with self._clients_lock:
                         if not self.running or len(self._clients) >= self.max_clients:
                             client.close()
                             continue
                         try:
-                            client = self._tls_context.wrap_socket(
+                            client = tls_context.wrap_socket(
                                 client, server_side=True, do_handshake_on_connect=False
                             )
                         except Exception:
@@ -146,7 +164,7 @@ class CommandServer:
 
         print("Server thread stopped")
 
-    def _drain_command_queue(self):
+    def _drain_command_queue(self) -> float | None:
         """Execute queued commands on Blender's main thread."""
         if not self.running:
             return None
@@ -170,7 +188,7 @@ class CommandServer:
 
         return 0.05
 
-    def _handle_client(self, client):
+    def _handle_client(self, client: ssl.SSLSocket) -> None:
         print("Client handler started")
         buffer = b""
 
@@ -195,7 +213,7 @@ class CommandServer:
                             raise TypeError("Blender command must be a JSON object")
 
                         print(f"Queued command: {command.get('type')}")
-                        response_queue = queue.Queue(maxsize=1)
+                        response_queue: queue.Queue[bytes] = queue.Queue(maxsize=1)
                         self.command_queue.put((command, response_queue))
                         while self.running:
                             try:

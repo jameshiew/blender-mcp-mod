@@ -35,14 +35,14 @@ def test_catalog_commands_and_capabilities_match(packaged_addon, monkeypatch):
 
     packaged_addon.server.bpy.context.scene.blendermcp_use_sketchfab = True
     for tool, command in zip(CATALOG, commands, strict=True):
+        registry = (
+            server.sketchfab_handlers
+            if command in sketchfab_commands
+            else server.handlers
+        )
         if command == "get_sketchfab_status":
             handler = server.sketchfab.get_sketchfab_status
         else:
-            registry = (
-                server.sketchfab_handlers
-                if command in sketchfab_commands
-                else server.handlers
-            )
             handler = registry[command]
         signature = inspect.signature(handler)
         schema = tool["inputSchema"]
@@ -68,6 +68,18 @@ def test_catalog_commands_and_capabilities_match(packaged_addon, monkeypatch):
         response = server.execute_command({"type": command, "params": parameters})
         assert response == {"status": "success", "result": result}
         record.assert_called_once_with(**parameters)
+
+
+@pytest.mark.parametrize("params", [None, [], "invalid", 42])
+def test_dispatch_rejects_non_object_parameters(packaged_addon, params):
+    server = packaged_addon.server.BlenderMCPServer()
+    handler = Mock()
+    server.handlers["execute_code"] = handler
+    assert server.execute_command({"type": "execute_code", "params": params}) == {
+        "status": "error",
+        "message": "Command params must be a JSON object",
+    }
+    handler.assert_not_called()
 
 
 @pytest.mark.parametrize("enabled", [False, True])

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import atexit
 import base64
 import hashlib
@@ -11,20 +13,49 @@ import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
 
 import bpy
+
+if TYPE_CHECKING:
+    from .render_worker import Progress
+
+
+class WorkerStatus(TypedDict, total=False):
+    phase: str
+    error: str
+    width: int
+    height: int
+    progress: Progress | None
+
+
+class RenderStatus(TypedDict):
+    job_id: str
+    state: str
+    phase: str
+    scene: str
+    frame: int
+    engine: str
+    elapsed_seconds: float
+    image_available: bool
+    progress: Progress | None
+    width: NotRequired[int]
+    height: NotRequired[int]
+    error_message: NotRequired[str]
 
 
 @dataclass
 class RenderJob:
     job_id: str
     directory: Path
-    process: subprocess.Popen
+    process: subprocess.Popen[bytes]
     scene: str
     frame: int
     engine: str
     started: float
-    state: str = "running"
+    state: Literal["running", "cancelling", "cancelled", "completed", "failed"] = (
+        "running"
+    )
     finished: float | None = None
     cancel_requested: float | None = None
     kill_sent: bool = False
@@ -34,33 +65,33 @@ class RenderJob:
 class RenderJobs:
     max_jobs = 8
 
-    def __init__(self):
-        self._temporary = None
-        self._jobs = {}
+    def __init__(self) -> None:
+        self._temporary: tempfile.TemporaryDirectory[str] | None = None
+        self._jobs: dict[str, RenderJob] = {}
 
     @staticmethod
-    def _integer(value, name, minimum, maximum):
+    def _integer(value: int, name: str, minimum: int, maximum: int) -> None:
         if type(value) is not int or not minimum <= value <= maximum:
             raise ValueError(f"{name} must be an integer from {minimum} to {maximum}")
 
     @staticmethod
-    def _worker_status(job):
+    def _worker_status(job: RenderJob) -> WorkerStatus:
         try:
             status = json.loads(
                 (job.directory / "status.json").read_text(encoding="utf-8")
             )
-            return status if isinstance(status, dict) else {}
+            return cast(WorkerStatus, status) if isinstance(status, dict) else {}
         except (OSError, ValueError):
             return {}
 
     @staticmethod
-    def _log_tail(job):
+    def _log_tail(job: RenderJob) -> str:
         with (job.directory / "worker.log").open("rb") as log:
             log.seek(0, 2)
             log.seek(max(0, log.tell() - 4096))
             return log.read().decode("utf-8", errors="replace").strip()
 
-    def poll(self):
+    def poll(self) -> None:
         for job in self._jobs.values():
             if job.finished is not None:
                 continue
@@ -93,7 +124,12 @@ class RenderJobs:
                 )
             (job.directory / "scene.blend").unlink(missing_ok=True)
 
-    def start(self, scene_name=None, frame=None, resolution_percentage=None):
+    def start(
+        self,
+        scene_name: str | None = None,
+        frame: int | None = None,
+        resolution_percentage: int | None = None,
+    ) -> RenderStatus:
         self.poll()
         for job in self._jobs.values():
             if job.finished is None:
@@ -174,12 +210,12 @@ class RenderJobs:
         return self.status(job_id)
 
     @staticmethod
-    def _remove_directory(directory):
+    def _remove_directory(directory: Path) -> None:
         import shutil
 
         shutil.rmtree(directory)
 
-    def _get(self, job_id):
+    def _get(self, job_id: str | None) -> RenderJob:
         if job_id is None:
             if not self._jobs:
                 raise ValueError("No render jobs in this server session")
@@ -188,11 +224,11 @@ class RenderJobs:
             raise ValueError(f"Unknown or expired render job: {job_id}")
         return self._jobs[job_id]
 
-    def status(self, job_id=None):
+    def status(self, job_id: str | None = None) -> RenderStatus:
         self.poll()
         job = self._get(job_id)
         worker = self._worker_status(job)
-        result = {
+        result: RenderStatus = {
             "job_id": job.job_id,
             "state": job.state,
             "phase": worker.get("phase", "starting")
@@ -215,7 +251,7 @@ class RenderJobs:
             result["progress"] = {**result["progress"], "remaining_seconds": None}
         return result
 
-    def cancel(self, job_id):
+    def cancel(self, job_id: str) -> RenderStatus:
         self.poll()
         job = self._get(job_id)
         if job.finished is None and job.cancel_requested is None:
@@ -225,7 +261,7 @@ class RenderJobs:
             job.state = "cancelling"
         return self.status(job.job_id)
 
-    def image(self, job_id, max_size=1000):
+    def image(self, job_id: str, max_size: int = 1000) -> dict[str, object]:
         self._integer(max_size, "max_size", 1, 4096)
         status = self.status(job_id)
         if status["state"] != "completed":
@@ -261,7 +297,9 @@ class RenderJobs:
             "image_data": base64.b64encode(data).decode("ascii"),
         }
 
-    def export(self, job_id, filepath, overwrite=False):
+    def export(
+        self, job_id: str, filepath: str, overwrite: bool = False
+    ) -> dict[str, object]:
         if not isinstance(filepath, str) or not filepath:
             raise ValueError("filepath must be a non-empty absolute PNG path")
         if type(overwrite) is not bool:
@@ -269,7 +307,9 @@ class RenderJobs:
         destination = Path(filepath).expanduser()
         if not destination.is_absolute() or destination.suffix.lower() != ".png":
             raise ValueError("filepath must be an absolute path ending in .png")
-        if destination.resolve().is_relative_to(Path(self._temporary.name).resolve()):
+        if self._temporary is not None and destination.resolve().is_relative_to(
+            Path(self._temporary.name).resolve()
+        ):
             raise ValueError("Export outside the temporary render storage")
         status = self.status(job_id)
         if status["state"] != "completed":
@@ -307,7 +347,7 @@ class RenderJobs:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
 
-    def close(self):
+    def close(self) -> None:
         for job in self._jobs.values():
             if job.process.poll() is None:
                 with suppress(ProcessLookupError):

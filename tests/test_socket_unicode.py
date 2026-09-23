@@ -55,8 +55,8 @@ def _make_server(server_class):
     server.execute_command = lambda command: {"status": "success", "result": {}}
 
     class RespondingQueue(queue.Queue):
-        def put(self, item):
-            super().put(item)
+        def put(self, item, block=True, timeout=None):
+            super().put(item, block=block, timeout=timeout)
             item[1].put(b'{"status":"success","result":{}}')
 
     server.command_queue = RespondingQueue()

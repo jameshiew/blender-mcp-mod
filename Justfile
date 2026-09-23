@@ -18,9 +18,13 @@ test:
     cargo test --locked
     uv run --locked pytest -q
 
+typecheck:
+    uv run --locked ty check
+
 verify:
     cargo fmt --all -- --check
     uv run --locked ruff format --check
     uv run --locked ruff check
+    just typecheck
     cargo clippy --locked --all-targets -- -D warnings
     just test

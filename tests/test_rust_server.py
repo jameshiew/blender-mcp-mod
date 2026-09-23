@@ -42,6 +42,12 @@ class Client:
             text=True,
             env=env,
         )
+        assert self.process.stdin is not None
+        assert self.process.stdout is not None
+        assert self.process.stderr is not None
+        self.stdin = self.process.stdin
+        self.stdout = self.process.stdout
+        self.stderr = self.process.stderr
         self.worker = threading.Thread(target=self.serve, daemon=True)
         self.reader = threading.Thread(target=self.read_responses, daemon=True)
         self.worker.start()
@@ -60,7 +66,7 @@ class Client:
         self.notify("notifications/initialized")
 
     def read_responses(self):
-        for line in self.process.stdout:
+        for line in self.stdout:
             try:
                 self.responses.put(json.loads(line))
             except json.JSONDecodeError as error:
@@ -137,14 +143,12 @@ class Client:
         return {"status": "success", "result": result}
 
     def notify(self, method):
-        self.process.stdin.write(
-            json.dumps({"jsonrpc": "2.0", "method": method}) + "\n"
-        )
-        self.process.stdin.flush()
+        self.stdin.write(json.dumps({"jsonrpc": "2.0", "method": method}) + "\n")
+        self.stdin.flush()
 
     def rpc(self, method, params):
         self.next_id += 1
-        self.process.stdin.write(
+        self.stdin.write(
             json.dumps(
                 {
                     "jsonrpc": "2.0",
@@ -155,7 +159,7 @@ class Client:
             )
             + "\n"
         )
-        self.process.stdin.flush()
+        self.stdin.flush()
         response = self.responses.get(timeout=10)
         assert isinstance(response, dict), response
         assert response["id"] == self.next_id
@@ -165,9 +169,9 @@ class Client:
         return self.rpc("tools/call", {"name": name, "arguments": arguments})["result"]
 
     def close(self):
-        self.process.stdin.close()
+        self.stdin.close()
         try:
-            assert self.process.wait(timeout=5) == 0, self.process.stderr.read()
+            assert self.process.wait(timeout=5) == 0, self.stderr.read()
         finally:
             if self.process.poll() is None:
                 self.process.kill()

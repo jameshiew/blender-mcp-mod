@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import os
@@ -5,21 +7,60 @@ import re
 import shutil
 import uuid
 from array import array
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, NotRequired, TypedDict, cast
 
 import bpy
+
+from .context import current_scene
+
+
+class ObjectSnapshot(TypedDict):
+    name: str
+    type: str
+    library: str | None
+    fields: dict[str, object]
+
+
+class ObjectChange(TypedDict):
+    name: str
+    type: str
+    library: str | None
+    previous_name: NotRequired[str]
+    changed_fields: NotRequired[list[str]]
+
+
+class Checkpoint(TypedDict):
+    checkpoint_id: str
+    label: str | None
+    created_at: str
+    original_filepath: str
+    scene: str
+    frame: int
+    object_count: int
+    blender_version: str
+    filepath: str
+    size_bytes: NotRequired[int]
+    sha256: NotRequired[str]
+
+
+class CheckpointList(TypedDict):
+    checkpoints: list[Checkpoint]
+    max_checkpoints: int
+
 
 SUMMARY_SCOPE = "Writable object/data properties, relationships, visibility in all scene view layers, modifier/constraint settings, material slots, and base mesh positions/topology. Shader contents, animation, mesh attributes, scene settings, external files, and Python state are not compared."
 
 
-def _identity(value):
+def _identity(value: bpy.types.ID | None) -> list[str | int] | None:
     if value is None:
         return None
     return [value.id_type, value.session_uid]
 
 
-def _value(value):
+def _value(value: Any) -> object:
     if isinstance(value, bpy.types.ID):
         return _identity(value)
     if hasattr(value, "to_dict"):
@@ -36,8 +77,10 @@ def _value(value):
         return str(value)
 
 
-def _properties(value, depth=2):
-    result = {"rna_type": value.bl_rna.identifier}
+def _properties(value: bpy.types.bpy_struct, depth: int = 2) -> dict[str, object]:
+    result: dict[str, object] = {
+        "rna_type": cast("bpy.types.Struct", value.bl_rna).identifier
+    }
     for prop in value.bl_rna.properties:
         if prop.identifier == "rna_type" or prop.is_readonly:
             continue
@@ -54,11 +97,11 @@ def _properties(value, depth=2):
     return result
 
 
-def _digest(value):
+def _digest(value: object) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
-def _mesh_digest(mesh):
+def _mesh_digest(mesh: bpy.types.Mesh) -> str:
     digest = hashlib.sha256()
     for collection, name, size, kind in (
         (mesh.vertices, "co", 3, "f"),
@@ -74,14 +117,14 @@ def _mesh_digest(mesh):
     return digest.hexdigest()
 
 
-def capture_objects():
+def capture_objects() -> dict[int, ObjectSnapshot]:
     if bpy.context.mode != "OBJECT":
         raise ValueError("Object change summaries require Object mode")
     data_cache = {}
-    result = {}
+    result: dict[int, ObjectSnapshot] = {}
     view_layers = [layer for scene in bpy.data.scenes for layer in scene.view_layers]
     for obj in bpy.data.objects:
-        fields = {
+        fields: dict[str, object] = {
             "properties": _digest(_properties(obj)),
             "collections": _digest(sorted(c.session_uid for c in obj.users_collection)),
             "modifiers": _digest([_properties(item) for item in obj.modifiers]),
@@ -103,7 +146,9 @@ def capture_objects():
             if key not in data_cache:
                 data_cache[key] = {"data_properties": _digest(_properties(obj.data))}
                 if obj.type == "MESH":
-                    data_cache[key]["mesh_geometry"] = _mesh_digest(obj.data)
+                    data_cache[key]["mesh_geometry"] = _mesh_digest(
+                        cast("bpy.types.Mesh", obj.data)
+                    )
             fields.update(data_cache[key])
         result[obj.session_uid] = {
             "name": obj.name,
@@ -114,13 +159,15 @@ def capture_objects():
     return result
 
 
-def compare_objects(before, after):
-    def description(item):
-        return {key: item[key] for key in ("name", "type", "library")}
+def compare_objects(
+    before: dict[int, ObjectSnapshot], after: dict[int, ObjectSnapshot]
+) -> dict[str, list[ObjectChange]]:
+    def description(item: ObjectSnapshot) -> ObjectChange:
+        return {"name": item["name"], "type": item["type"], "library": item["library"]}
 
     created = [description(after[key]) for key in after.keys() - before.keys()]
     removed = [description(before[key]) for key in before.keys() - after.keys()]
-    changed = []
+    changed: list[ObjectChange] = []
     for key in before.keys() & after.keys():
         old, new = before[key], after[key]
         fields = sorted(
@@ -150,7 +197,12 @@ def compare_objects(before, after):
     return changes
 
 
-def change_page(changes, category, offset=0, limit=100):
+def change_page(
+    changes: dict[str, list[ObjectChange]],
+    category: str,
+    offset: int = 0,
+    limit: int = 100,
+) -> dict[str, object]:
     if category not in {"created", "changed", "removed"}:
         raise ValueError("category must be created, changed, or removed")
     if type(offset) is not int or offset < 0:
@@ -171,7 +223,9 @@ def change_page(changes, category, offset=0, limit=100):
     }
 
 
-def summarize_changes(changes, limit=100):
+def summarize_changes(
+    changes: dict[str, list[ObjectChange]], limit: int = 100
+) -> dict[str, object]:
     pages = {
         category: change_page(changes, category, limit=limit) for category in changes
     }
@@ -185,11 +239,11 @@ def summarize_changes(changes, limit=100):
 class Checkpoints:
     max_checkpoints = 32
 
-    def __init__(self, directory):
+    def __init__(self, directory: str | os.PathLike[str]) -> None:
         self.directory = Path(directory)
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
 
-    def _paths(self, checkpoint_id):
+    def _paths(self, checkpoint_id: str) -> tuple[Path, Path]:
         if not isinstance(checkpoint_id, str) or not re.fullmatch(
             r"[0-9a-f]{32}", checkpoint_id
         ):
@@ -202,20 +256,20 @@ class Checkpoints:
         )
 
     @staticmethod
-    def _checksum(path):
+    def _checksum(path: Path) -> str:
         with path.open("rb") as file:
             return hashlib.file_digest(file, "sha256").hexdigest()
 
-    def _get(self, checkpoint_id):
+    def _get(self, checkpoint_id: str) -> tuple[Path, Path, Checkpoint]:
         path, metadata_path = self._paths(checkpoint_id)
         if not path.is_file() or not metadata_path.is_file():
             raise ValueError(f"Checkpoint not found: {checkpoint_id}")
-        metadata = json.loads(metadata_path.read_text())
+        metadata = cast(Checkpoint, json.loads(metadata_path.read_text()))
         if metadata.get("checkpoint_id") != checkpoint_id:
             raise ValueError("Checkpoint metadata does not match its ID")
         return path, metadata_path, metadata
 
-    def list(self):
+    def list(self) -> CheckpointList:
         checkpoints = []
         for metadata in sorted(self.directory.glob("*.json")):
             if re.fullmatch(r"[0-9a-f]{32}", metadata.stem):
@@ -226,7 +280,7 @@ class Checkpoints:
             "max_checkpoints": self.max_checkpoints,
         }
 
-    def create(self, label=None):
+    def create(self, label: str | None = None) -> Checkpoint:
         if label is not None and (
             not isinstance(label, str) or not 1 <= len(label) <= 128
         ):
@@ -239,13 +293,13 @@ class Checkpoints:
             )
         checkpoint_id = uuid.uuid4().hex
         path, metadata_path = self._paths(checkpoint_id)
-        metadata = {
+        metadata: Checkpoint = {
             "checkpoint_id": checkpoint_id,
             "label": label,
             "created_at": datetime.now(UTC).isoformat(),
             "original_filepath": bpy.data.filepath,
-            "scene": bpy.context.scene.name,
-            "frame": bpy.context.scene.frame_current,
+            "scene": current_scene().name,
+            "frame": current_scene().frame_current,
             "object_count": len(bpy.data.objects),
             "blender_version": bpy.app.version_string,
             "filepath": str(path),
@@ -270,7 +324,9 @@ class Checkpoints:
             raise
         return metadata
 
-    def restore(self, checkpoint_id, clear_namespaces):
+    def restore(
+        self, checkpoint_id: str, clear_namespaces: Callable[[], None]
+    ) -> dict[str, object]:
         path, _, metadata = self._get(checkpoint_id)
         if self._checksum(path) != metadata["sha256"]:
             raise ValueError("Checkpoint file changed after creation; restore refused")
@@ -296,7 +352,7 @@ class Checkpoints:
             "namespaces_cleared": True,
         }
 
-    def delete(self, checkpoint_id):
+    def delete(self, checkpoint_id: str) -> dict[str, object]:
         path, metadata_path, _ = self._get(checkpoint_id)
         if os.path.abspath(bpy.data.filepath) == str(path.resolve()):
             raise ValueError("Cannot delete the currently open checkpoint file")
