@@ -2,12 +2,11 @@ import base64
 import hashlib
 import importlib.util
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from addon_stub import _load_addon, _scene
 from conftest import ROOT_ADDON
 

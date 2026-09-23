@@ -3,7 +3,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from conftest import blender_environment
 
 
@@ -47,6 +46,7 @@ print('EVALUATED_GEOMETRY_OK', json.dumps(result))
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
     assert checked.returncode == 0, checked.stdout + checked.stderr
     assert "EVALUATED_GEOMETRY_OK" in checked.stdout

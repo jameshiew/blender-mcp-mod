@@ -3,7 +3,6 @@ from itertools import product
 import bpy
 from mathutils import Vector
 
-
 _CONVERTIBLE_TYPES = {"CURVE", "SURFACE", "FONT", "META"}
 
 
@@ -65,7 +64,9 @@ def evaluated_geometry(obj):
         )
     mesh, local_bounds = _mesh_geometry(evaluated)
     bounds = _include_bounds(None, local_bounds, evaluated.matrix_world)
-    total = dict(mesh) if mesh is not None else dict(vertices=0, edges=0, polygons=0)
+    total = (
+        dict(mesh) if mesh is not None else {"vertices": 0, "edges": 0, "polygons": 0}
+    )
     cache = {_geometry_key(evaluated): (mesh, local_bounds)}
     sources = {}
     instance_count = 0

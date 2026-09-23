@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
 import os
 import ssl
@@ -10,6 +9,7 @@ import subprocess
 import tempfile
 import tomllib
 import zipfile
+from pathlib import Path
 
 import pytest
 

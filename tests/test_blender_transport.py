@@ -8,7 +8,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from conftest import RELEASE_VERSION, blender_environment, client_tls_context
 from test_rust_server import Client
 

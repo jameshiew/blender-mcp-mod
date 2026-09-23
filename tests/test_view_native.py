@@ -1,9 +1,8 @@
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
-
 from conftest import blender_environment
 
 
@@ -42,6 +41,7 @@ print('CAMERA_CHECKS_OK', checks['run_checks'](module.BlenderMCPServer()))
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
     assert checked.returncode == 0, checked.stdout + checked.stderr
     assert "CAMERA_CHECKS_OK" in checked.stdout

@@ -1,6 +1,6 @@
 import hashlib
-from pathlib import Path
 import tomllib
+from pathlib import Path
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parent.parent

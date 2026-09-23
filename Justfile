@@ -18,5 +18,6 @@ test:
 verify:
     cargo fmt --all -- --check
     uv run --locked ruff format --check
+    uv run --locked ruff check
     cargo clippy --locked --all-targets -- -D warnings
     just test

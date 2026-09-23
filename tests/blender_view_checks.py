@@ -1,7 +1,7 @@
 def run_checks(server, viewport=False):
     import base64
-    from itertools import product
     import math
+    from itertools import product
 
     import bpy
     from bpy_extras.object_utils import world_to_camera_view

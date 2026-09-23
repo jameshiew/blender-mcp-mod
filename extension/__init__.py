@@ -1,27 +1,31 @@
 # Code created by Siddharth Ahuja: www.github.com/ahujasid © 2025
 
-import bpy
-import mathutils
+import base64
+import io
 import json
-import threading
+import logging
+import os
+import queue
+import shutil
 import socket
 import ssl
 import stat
-from pathlib import Path
-import queue
+import tempfile
+import threading
 import time
 import tomllib
-import requests
-import tempfile
 import traceback
-import os
-import shutil
 import zipfile
-from bpy.props import IntProperty
-import io
-import base64
 from contextlib import redirect_stdout, suppress
 from functools import cache
+from pathlib import Path
+
+import bpy
+import mathutils
+import requests
+from bpy.props import IntProperty
+
+logger = logging.getLogger(__name__)
 
 
 @cache
@@ -182,7 +186,7 @@ class BlenderMCPServer:
             print(f"BlenderMCP server started on {self.host}:{self.port}")
         except Exception as e:
             self.last_error = f"Secure connection unavailable: {e}. Run blender-mcp setup-connection, then start the server again."
-            print(f"Failed to start server: {str(e)}")
+            logger.exception("Failed to start server")
             self.stop()
 
     def stop(self):
@@ -197,15 +201,13 @@ class BlenderMCPServer:
         try:
             if bpy.app.timers.is_registered(self._drain_command_queue):
                 bpy.app.timers.unregister(self._drain_command_queue)
-        except Exception:
-            pass
+        except RuntimeError:
+            logger.exception("Failed to unregister command timer")
 
         # Close socket
         if self.socket:
-            try:
+            with suppress(OSError):
                 self.socket.close()
-            except:
-                pass
             self.socket = None
 
         # Shut down live client sockets. Without this, handler threads stay
@@ -216,14 +218,10 @@ class BlenderMCPServer:
             clients = list(self._clients)
             self._clients.clear()
         for client in clients:
-            try:
+            with suppress(OSError):
                 client.shutdown(socket.SHUT_RDWR)
-            except Exception:
-                pass
-            try:
+            with suppress(OSError):
                 client.close()
-            except Exception:
-                pass
 
         # Drop any commands that will never be serviced now.
         while True:
@@ -237,8 +235,8 @@ class BlenderMCPServer:
             try:
                 if self.server_thread.is_alive():
                     self.server_thread.join(timeout=1.0)
-            except:
-                pass
+            except RuntimeError:
+                logger.exception("Failed to join server thread")
             self.server_thread = None
 
         print("BlenderMCP server stopped")
@@ -252,7 +250,7 @@ class BlenderMCPServer:
             try:
                 # Accept new connection
                 try:
-                    client, address = self.socket.accept()
+                    client, _address = self.socket.accept()
                     with self._clients_lock:
                         if not self.running or len(self._clients) >= self.max_clients:
                             client.close()
@@ -272,14 +270,14 @@ class BlenderMCPServer:
                     )
                     client_thread.daemon = True
                     client_thread.start()
-                except socket.timeout:
+                except TimeoutError:
                     # Just check running condition
                     continue
-                except Exception as e:
-                    print(f"Error accepting connection: {str(e)}")
+                except Exception:
+                    logger.exception("Error accepting connection")
                     time.sleep(0.5)
-            except Exception as e:
-                print(f"Error in server loop: {str(e)}")
+            except Exception:
+                logger.exception("Error in server loop")
                 if not self.running:
                     break
                 time.sleep(0.5)
@@ -308,8 +306,7 @@ class BlenderMCPServer:
                 response = self.execute_command(command)
                 response_json = json.dumps(response)
             except Exception as e:
-                print(f"Error executing command: {str(e)}")
-                traceback.print_exc()
+                logger.exception("Error executing command")
                 response_json = json.dumps({"status": "error", "message": str(e)})
 
             response_queue.put(response_json.encode("utf-8"))
@@ -341,7 +338,7 @@ class BlenderMCPServer:
                         command = json.loads(buffer.decode("utf-8"))
                         buffer = b""
                         if not isinstance(command, dict):
-                            raise ValueError("Blender command must be a JSON object")
+                            raise TypeError("Blender command must be a JSON object")
 
                         # Hand off to the main thread. Never call
                         # bpy.app.timers.register() from here - it is not
@@ -368,21 +365,19 @@ class BlenderMCPServer:
                         # boundary, which fails decode() before json.loads()
                         # ever runs - that's incomplete data too, not garbage.
                         pass
-                except socket.timeout:
+                except TimeoutError:
                     # Expected; loop round and re-check self.running.
                     continue
-                except Exception as e:
-                    print(f"Error receiving data: {str(e)}")
+                except (OSError, TypeError, ValueError) as e:
+                    print(f"Error receiving data: {e}")
                     break
-        except Exception as e:
-            print(f"Error in client handler: {str(e)}")
+        except OSError as e:
+            print(f"Error in client handler: {e}")
         finally:
             with self._clients_lock:
                 self._clients.discard(client)
-            try:
+            with suppress(OSError):
                 client.close()
-            except:
-                pass
             print("Client handler stopped")
 
     def execute_command(self, command):
@@ -391,8 +386,7 @@ class BlenderMCPServer:
             return self._execute_command_internal(command)
 
         except Exception as e:
-            print(f"Error executing command: {str(e)}")
-            traceback.print_exc()
+            logger.exception("Error executing command")
             return {"status": "error", "message": str(e)}
 
     def _execute_command_internal(self, command):
@@ -446,11 +440,10 @@ class BlenderMCPServer:
             try:
                 print(f"Executing handler for {cmd_type}")
                 result = handler(**params)
-                print(f"Handler execution complete")
+                print("Handler execution complete")
                 return {"status": "success", "result": result}
             except Exception as e:
-                print(f"Error in handler: {str(e)}")
-                traceback.print_exc()
+                logger.exception("Error in handler")
                 return {"status": "error", "message": str(e)}
         else:
             return {"status": "error", "message": f"Unknown command type: {cmd_type}"}
@@ -610,8 +603,7 @@ class BlenderMCPServer:
 
             return scene_info
         except Exception as e:
-            print(f"Error in get_scene_info: {str(e)}")
-            traceback.print_exc()
+            logger.exception("Error in get_scene_info")
             return {"error": str(e)}
 
     @staticmethod
@@ -784,6 +776,7 @@ class BlenderMCPServer:
                 max_size, filepath, format, viewport_index, camera_only
             )
         except Exception as error:
+            logger.exception("Error saving viewport screenshot")
             return {"error": str(error)}
 
     def _checkpoint_store(self):
@@ -874,11 +867,11 @@ class BlenderMCPServer:
         if namespace is not None and (
             not isinstance(namespace, str) or not 1 <= len(namespace) <= 128
         ):
-            raise Exception(
+            raise ValueError(
                 "Code execution error: namespace must be a string of 1 to 128 characters"
             )
         if reset_namespace and namespace is None:
-            raise Exception(
+            raise ValueError(
                 "Code execution error: reset_namespace requires a namespace"
             )
         if type(checkpoint) is not bool or type(summarize_changes) is not bool:
@@ -887,9 +880,12 @@ class BlenderMCPServer:
         if recovery:
             import hashlib
             import uuid
+
             from .recovery import (
                 capture_objects,
                 compare_objects,
+            )
+            from .recovery import (
                 summarize_changes as summarize,
             )
 
@@ -917,7 +913,7 @@ class BlenderMCPServer:
                 )
             with redirect_stdout(stdout), redirect_stderr(stderr):
                 started = True
-                exec(compiled, execution_namespace)
+                exec(compiled, execution_namespace)  # noqa: S102
 
             result = {
                 "started": True,
@@ -926,6 +922,7 @@ class BlenderMCPServer:
                 "result": stdout.getvalue(),
             }
         except Exception as e:
+            logger.exception("Error executing Blender Python code")
             diagnostic = BoundedOutput()
             diagnostic.write(f"{type(e).__name__}\n")
             traceback.print_exception(
@@ -969,6 +966,7 @@ class BlenderMCPServer:
                     if not result["succeeded"] and any(changes.values()):
                         result["partial_changes"] = True
                 except Exception as error:
+                    logger.exception("Error summarizing execution changes")
                     result["summary_error"] = str(error)[:2048]
             self._execution_results[execution_id] = result
             while len(self._execution_results) > 8:
@@ -1011,9 +1009,10 @@ class BlenderMCPServer:
                     "message": "Timeout connecting to Sketchfab API. Check your internet connection.",
                 }
             except Exception as e:
+                logger.exception("Error testing Sketchfab API key")
                 return {
                     "enabled": False,
-                    "message": f"Error testing Sketchfab API key: {str(e)}",
+                    "message": f"Error testing Sketchfab API key: {e!s}",
                 }
 
         if enabled and api_key:
@@ -1099,11 +1098,9 @@ class BlenderMCPServer:
         except requests.exceptions.Timeout:
             return {"error": "Request timed out. Check your internet connection."}
         except json.JSONDecodeError as e:
-            return {"error": f"Invalid JSON response from Sketchfab API: {str(e)}"}
+            return {"error": f"Invalid JSON response from Sketchfab API: {e!s}"}
         except Exception as e:
-            import traceback
-
-            traceback.print_exc()
+            logger.exception("Error searching Sketchfab models")
             return {"error": str(e)}
 
     def get_sketchfab_model_preview(self, uid):
@@ -1190,10 +1187,8 @@ class BlenderMCPServer:
         except requests.exceptions.Timeout:
             return {"error": "Request timed out. Check your internet connection."}
         except Exception as e:
-            import traceback
-
-            traceback.print_exc()
-            return {"error": f"Failed to get model preview: {str(e)}"}
+            logger.exception("Error getting Sketchfab model preview")
+            return {"error": f"Failed to get model preview: {e!s}"}
 
     def download_sketchfab_model(self, uid, normalize_size=False, target_size=1.0):
         """Download a model from Sketchfab by its UID
@@ -1301,9 +1296,7 @@ class BlenderMCPServer:
 
             # Find the main glTF file
             gltf_files = [
-                f
-                for f in os.listdir(temp_dir)
-                if f.endswith(".gltf") or f.endswith(".glb")
+                f for f in os.listdir(temp_dir) if f.endswith((".gltf", ".glb"))
             ]
 
             if not gltf_files:
@@ -1442,12 +1435,10 @@ class BlenderMCPServer:
                 "error": "Request timed out. Check your internet connection and try again with a simpler model."
             }
         except json.JSONDecodeError as e:
-            return {"error": f"Invalid JSON response from Sketchfab API: {str(e)}"}
+            return {"error": f"Invalid JSON response from Sketchfab API: {e!s}"}
         except Exception as e:
-            import traceback
-
-            traceback.print_exc()
-            return {"error": f"Failed to download model: {str(e)}"}
+            logger.exception("Error downloading Sketchfab model")
+            return {"error": f"Failed to download model: {e!s}"}
 
     # endregion
 

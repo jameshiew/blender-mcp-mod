@@ -2,7 +2,6 @@ from itertools import product
 from types import SimpleNamespace
 
 import pytest
-
 from extension_stub import _load_addon
 
 
@@ -143,7 +142,12 @@ def test_filters_apply_before_pagination_and_keep_scene_count(monkeypatch):
             scene_object("Table", selected=True),
         ],
     )
-    options = dict(name_filter="lAmP", object_type="MESH", selected_only=True, limit=1)
+    options = {
+        "name_filter": "lAmP",
+        "object_type": "MESH",
+        "selected_only": True,
+        "limit": 1,
+    }
     first = server.get_scene_info(**options)
     assert [obj["name"] for obj in first["objects"]] == ["Lamp.Shade.A"]
     assert first["object_count"] == 5

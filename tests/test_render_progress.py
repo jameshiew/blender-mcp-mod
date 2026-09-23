@@ -2,7 +2,6 @@ import importlib.util
 import json
 
 import pytest
-
 from conftest import ROOT_ADDON
 from extension_stub import _load_addon
 

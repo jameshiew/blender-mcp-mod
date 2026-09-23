@@ -1,16 +1,16 @@
 import atexit
 import base64
 import hashlib
-from contextlib import suppress
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import time
 import uuid
+from contextlib import suppress
+from dataclasses import dataclass
+from pathlib import Path
 
 import bpy
 

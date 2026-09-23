@@ -1,5 +1,4 @@
 import pytest
-
 from test_server_threading import BlenderMCPServer
 
 

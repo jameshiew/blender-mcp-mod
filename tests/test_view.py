@@ -1,10 +1,9 @@
 import importlib.util
-from types import SimpleNamespace
 import sys
 from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
-
 from conftest import ROOT_ADDON
 from extension_stub import _load_addon
 from test_scene_info import Vector
@@ -75,8 +74,8 @@ def test_viewport_uses_requested_window_and_reports_missing_or_quad_view(view):
         )
         return SimpleNamespace(screen=SimpleNamespace(areas=[area])), area, region
 
-    first, first_area, first_region = window()
-    second, second_area, second_region = window()
+    first, first_area, _first_region = window()
+    second, _second_area, _second_region = window()
     bpy.context.window = second
     bpy.context.window_manager = SimpleNamespace(windows=[first, second])
     first.name = "First"

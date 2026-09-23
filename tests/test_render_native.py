@@ -2,7 +2,6 @@ import os
 import subprocess
 
 import pytest
-
 from conftest import ROOT_ADDON, blender_environment
 
 
@@ -135,6 +134,7 @@ assert destination.is_file()
         capture_output=True,
         text=True,
         timeout=90,
+        check=False,
     )
     assert checked.returncode == 0, checked.stdout + checked.stderr
     assert "RENDER_JOBS_OK" in checked.stdout

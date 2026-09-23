@@ -1,16 +1,17 @@
 import json
+import logging
 import os
 import socket
-import ssl
 import subprocess
 import threading
 import time
 
 import pytest
-
 from conftest import client_tls_context, create_credentials
 from test_rust_server import Client
-from test_server_threading import BlenderMCPServer, _free_port, _connect
+from test_server_threading import BlenderMCPServer, _connect, _free_port
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
@@ -101,7 +102,7 @@ def test_unauthenticated_connection_count_is_bounded(server):
             clients.append(
                 socket.create_connection(("127.0.0.1", server.port), timeout=2)
             )
-            wait_until(lambda: len(server._clients) == count)
+            wait_until(lambda count=count: len(server._clients) == count)
         with socket.create_connection(
             ("127.0.0.1", server.port), timeout=2
         ) as rejected:
@@ -127,6 +128,7 @@ def test_setup_rejects_corrupt_server_identity_without_replacing_it(
         [str(binary), "setup-connection"],
         env=dict(os.environ, BLENDER_MCP_CONFIG_DIR=str(directory)),
         capture_output=True,
+        check=False,
     )
     assert result.returncode != 0
     assert b"left unchanged" in result.stderr
@@ -164,6 +166,7 @@ def test_missing_and_corrupt_credentials_never_open_the_port(binary, tmp_path):
         [str(binary), "setup-connection"],
         env=dict(os.environ, BLENDER_MCP_CONFIG_DIR=str(directory)),
         capture_output=True,
+        check=False,
     )
     assert result.returncode != 0
     assert (directory / "credentials.json").read_bytes() == before
@@ -190,6 +193,7 @@ def test_unsafe_credential_storage_is_rejected(binary, tmp_path, target):
         [str(binary), "setup-connection"],
         env=dict(os.environ, BLENDER_MCP_CONFIG_DIR=str(directory)),
         capture_output=True,
+        check=False,
     )
     assert result.returncode != 0
 
@@ -219,6 +223,7 @@ def test_rust_client_executes_unsandboxed_python_through_real_handler(
                     )
                 )
         except Exception as error:
+            logger.exception("Error calling execute_blender_code")
             errors.append(error)
 
     worker = threading.Thread(target=call)

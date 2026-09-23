@@ -3,16 +3,15 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
-import subprocess
 import shutil
+import subprocess
 import sys
 import tomllib
-from types import SimpleNamespace
 import zipfile
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-
 from conftest import (
     PROTOCOL_VERSION,
     RELEASE_TUPLE,
@@ -188,6 +187,7 @@ def test_installer_uses_blender_and_propagates_failure(binary, tmp_path, exit_co
         [str(binary), "install-addon", "--blender", str(fake), "--repo", "custom_repo"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert (result.returncode == 0) is (exit_code == 0)
     arguments = json.loads(recorded.read_text())
@@ -223,6 +223,7 @@ def test_blender_validates_and_installs_extension(binary, addon_package, tmp_pat
         env=environment,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert install.returncode == 0, install.stdout + install.stderr
     script = tmp_path / "check.py"
@@ -280,6 +281,7 @@ print("EXTENSION_OK", bpy.app.version_string)
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
     assert checked.returncode == 0, checked.stdout + checked.stderr
     assert "EXTENSION_OK" in checked.stdout

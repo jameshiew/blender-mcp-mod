@@ -203,7 +203,7 @@ def test_full_changes_are_pageable_after_later_scene_edits(recovery, monkeypatch
 
 
 def test_preparation_and_syntax_failures_remain_retrievable(recovery, monkeypatch):
-    server, module, bpy = recovery
+    server, _module, bpy = recovery
     syntax = server.execute_code("if True", summarize_changes=True)
     assert not syntax["started"] and syntax["partial_changes"] is False
     assert "SyntaxError" in syntax["error_message"]

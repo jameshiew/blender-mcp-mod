@@ -2,7 +2,6 @@ import importlib.util
 from types import SimpleNamespace
 
 import pytest
-
 from conftest import ROOT_ADDON
 from extension_stub import _load_addon
 from test_scene_info import Matrix, Vector
@@ -40,7 +39,7 @@ def test_temporary_mesh_is_released_on_success_and_failure(geometry, failure):
             module._mesh_geometry(obj)
     else:
         assert module._mesh_geometry(obj) == (
-            dict(vertices=0, edges=0, polygons=0),
+            {"vertices": 0, "edges": 0, "polygons": 0},
             None,
         )
     assert cleared == [True]
@@ -103,19 +102,21 @@ def test_repeated_instances_share_conversion_and_source_summary(geometry):
     bpy.context.scene.frame_current = 10
     result = module.evaluated_geometry(original)
     assert len(conversions) == 1
-    assert result["mesh_including_instances"] == dict(
-        vertices=2000, edges=0, polygons=0
-    )
+    assert result["mesh_including_instances"] == {
+        "vertices": 2000,
+        "edges": 0,
+        "polygons": 0,
+    }
     assert result["instances"] == {
         "count": 1000,
         "sources": [
-            dict(
-                name="Plant",
-                library="/assets/plants.blend",
-                type="MESH",
-                count=1000,
-                mesh=dict(vertices=2, edges=0, polygons=0),
-            )
+            {
+                "name": "Plant",
+                "library": "/assets/plants.blend",
+                "type": "MESH",
+                "count": 1000,
+                "mesh": {"vertices": 2, "edges": 0, "polygons": 0},
+            }
         ],
     }
     assert result["dimensions"] == [2, 4, 6]

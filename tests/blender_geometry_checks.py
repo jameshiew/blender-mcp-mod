@@ -69,10 +69,10 @@ def run_checks(server):
         array = obj.modifiers.new("Array", "ARRAY")
         array.count = 2
         base = server.get_object_info(obj.name)
-        assert base["mesh"] == dict(vertices=8, edges=12, polygons=6), base
+        assert base["mesh"] == {"vertices": 8, "edges": 12, "polygons": 6}, base
         assert "evaluated" not in base
         result = inspect(obj)
-        assert result["mesh"] == dict(vertices=16, edges=24, polygons=12), result
+        assert result["mesh"] == {"vertices": 16, "edges": 24, "polygons": 12}, result
         assert result["mesh_including_instances"] == result["mesh"], result
         assert result["depsgraph_mode"] == "VIEWPORT", result
         close_bounds(result["world_bounding_box"], [[-1, -1, -1], [3, 1, 1]])
@@ -111,9 +111,11 @@ def run_checks(server):
         assert outer_info["dimensions"] == [0, 0, 0], outer_info
         instanced = outer_info["evaluated"]
         assert instanced["mesh"] is None, instanced
-        assert instanced["mesh_including_instances"] == dict(
-            vertices=32, edges=48, polygons=24
-        ), instanced
+        assert instanced["mesh_including_instances"] == {
+            "vertices": 32,
+            "edges": 48,
+            "polygons": 24,
+        }, instanced
         assert instanced["instances"]["count"] == 4, instanced
         assert {s["name"]: s["count"] for s in instanced["instances"]["sources"]} == {
             inner.name: 1,
@@ -123,13 +125,13 @@ def run_checks(server):
         plant_info = next(
             s for s in instanced["instances"]["sources"] if s["name"] == plant.name
         )
-        assert plant_info == dict(
-            name=plant.name,
-            library=None,
-            type="MESH",
-            count=2,
-            mesh=dict(vertices=16, edges=24, polygons=12),
-        ), plant_info
+        assert plant_info == {
+            "name": plant.name,
+            "library": None,
+            "type": "MESH",
+            "count": 2,
+            "mesh": {"vertices": 16, "edges": 24, "polygons": 12},
+        }, plant_info
         assert instanced["instance_collection"] == nested.name
         close_bounds(instanced["world_bounding_box"], [[-5, -8, -1], [25, 0, 1]])
 
@@ -155,7 +157,7 @@ def run_checks(server):
         group.links.new(instances.outputs["Instances"], outputs.inputs["Geometry"])
         emitter.modifiers.new("Instances", "NODES").node_group = group
         nodes = inspect(emitter)
-        assert nodes["mesh"] == dict(vertices=0, edges=0, polygons=0), nodes
+        assert nodes["mesh"] == {"vertices": 0, "edges": 0, "polygons": 0}, nodes
         assert nodes["instances"]["count"] == 2, nodes
         assert nodes["mesh_including_instances"]["vertices"] == 32, nodes
         assert nodes["instances"]["sources"][0]["name"] == plant.name, nodes
@@ -234,7 +236,9 @@ def run_checks(server):
         )
         collection.objects.link(zero)
         zero_info = inspect(zero)
-        assert zero_info["mesh"] == dict(vertices=0, edges=0, polygons=0), zero_info
+        assert zero_info["mesh"] == {"vertices": 0, "edges": 0, "polygons": 0}, (
+            zero_info
+        )
         assert zero_info["world_bounding_box"] is zero_info["dimensions"] is None, (
             zero_info
         )

@@ -6,7 +6,6 @@ import queue
 import socket
 import subprocess
 import threading
-from pathlib import Path
 
 import pytest
 from conftest import PROTOCOL_VERSION, RELEASE_TUPLE, RELEASE_VERSION, ROOT_ADDON

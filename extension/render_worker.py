@@ -1,9 +1,9 @@
 import json
-from pathlib import Path
 import re
 import struct
 import sys
 import traceback
+from pathlib import Path
 
 import bpy
 
@@ -22,7 +22,9 @@ class RenderProgress:
     def update(self, statistics, *_args):
         if not isinstance(statistics, str):
             return
-        samples = re.search(r"\bSample\s+(\d+)\s*/\s*(\d+)\b", statistics, re.I)
+        samples = re.search(
+            r"\bSample\s+(\d+)\s*/\s*(\d+)\b", statistics, re.IGNORECASE
+        )
         remaining = re.search(
             r"\bRemaining:\s*((?:\d+:){1,2}\d+(?:\.\d+)?)", statistics
         )

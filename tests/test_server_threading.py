@@ -14,15 +14,15 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
+import os
 import socket
-import sys
 import threading
 import time
 import types
+from pathlib import Path
 
 from conftest import ROOT_ADDON, client_tls_context
-from pathlib import Path
-import os
 
 
 def _load_server_class():
@@ -73,15 +73,17 @@ def _load_server_class():
         "tempfile": __import__("tempfile"),
         "threading": threading,
         "json": json,
+        "logger": logging.getLogger(__name__),
         "time": time,
         "queue": __import__("queue"),
         "traceback": __import__("traceback"),
         "os": __import__("os"),
         "io": __import__("io"),
         "redirect_stdout": __import__("contextlib").redirect_stdout,
+        "suppress": __import__("contextlib").suppress,
         "get_blendermcp_addon_preferences": lambda context=None: None,
     }
-    exec(compile(ast.Module(body=body, type_ignores=[]), "<addon>", "exec"), namespace)
+    exec(compile(ast.Module(body=body, type_ignores=[]), "<addon>", "exec"), namespace)  # noqa: S102
     return namespace["BlenderMCPServer"], registered
 
 
