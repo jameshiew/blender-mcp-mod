@@ -67,15 +67,10 @@ def run_checks(server):
         )
         node_mod = obj.modifiers.new("Procedural", "NODES")
         node_mod.node_group = geo
-        if hasattr(node_mod, "properties"):
-            input_property = getattr(node_mod.properties.inputs, factor.identifier)
-            input_property.value = 3.75
-            input_property.type = "ATTRIBUTE"
-            input_property.attribute_name = "height"
-        else:
-            node_mod[factor.identifier] = 3.75
-            node_mod[factor.identifier + "_use_attribute"] = True
-            node_mod[factor.identifier + "_attribute_name"] = "height"
+        input_property = getattr(node_mod.properties.inputs, factor.identifier)
+        input_property.value = 3.75
+        input_property.type = "ATTRIBUTE"
+        input_property.attribute_name = "height"
         action = bpy.data.actions.new("Inspection.SharedAction")
         own_slot = action.slots.new("OBJECT", obj.name)
         other_slot = action.slots.new("OBJECT", target.name)

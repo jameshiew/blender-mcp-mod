@@ -23,7 +23,7 @@ enum Command {
         #[arg(long)]
         output: Option<PathBuf>,
     },
-    #[command(about = "Install the bundled extension using Blender 5.0 or later")]
+    #[command(about = "Install the bundled extension using Blender 5.2 or later")]
     InstallAddon {
         #[arg(long, default_value = "blender")]
         blender: PathBuf,

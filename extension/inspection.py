@@ -481,23 +481,13 @@ def _modifier_info(modifier, index):
                 "identifier": key,
                 "socket_type": item.socket_type,
             }
-            if hasattr(modifier, "properties"):
-                inputs = getattr(modifier.properties, "inputs", None)
-                value = getattr(inputs, key, None)
-                if value is not None:
-                    for field in ("value", "type", "attribute_name"):
-                        if hasattr(value, field):
-                            result[field] = _value(getattr(value, field))
-                    if hasattr(value, "type"):
-                        result["use_attribute"] = value.type == "ATTRIBUTE"
-                return result
-            if key in modifier:
-                result["value"] = _value(modifier[key])
-            elif hasattr(item, "default_value"):
-                result["value"] = _value(item.default_value)
-            for suffix in ("_use_attribute", "_attribute_name"):
-                if key + suffix in modifier:
-                    result[suffix[1:]] = _value(modifier[key + suffix])
+            value = getattr(modifier.properties.inputs, key, None)
+            if value is not None:
+                for field in ("value", "type", "attribute_name"):
+                    if hasattr(value, field):
+                        result[field] = _value(getattr(value, field))
+                if hasattr(value, "type"):
+                    result["use_attribute"] = value.type == "ATTRIBUTE"
             return result
 
         result["node_group"] = _ref(modifier.node_group)

@@ -8,11 +8,17 @@ includes the matching extension and its Python dependencies.
 
 ## Requirements
 
-- Blender 5.0 or later.
+- Blender 5.2 LTS or later.
 - Rust and Cargo to build the executable.
 - Codex with the `codex` CLI available.
 
 The commands below use a macOS/Linux shell.
+
+Geometry Nodes inspection uses Blender 5.2's RNA input properties. Scripts
+that change modifier inputs must also use this API, for example
+`getattr(modifier.properties.inputs, socket.identifier).value = 1.0`.
+See the [Blender 5.2 Python API changes](https://developer.blender.org/docs/release_notes/5.2/python_api/#geometry-nodes)
+for attribute inputs and other migration details.
 
 ## Install
 
@@ -79,6 +85,8 @@ If the extension reports missing credentials, run
 `~/.local/bin/blender-mcp setup-connection`, then start its listener again.
 
 ## Update
+
+Upgrade to Blender 5.2 or later before installing this version of the extension.
 
 After updating the checkout, repeat the Cargo install and `install-addon`
 commands, then restart Codex and Blender. Update both components together;

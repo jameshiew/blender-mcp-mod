@@ -116,7 +116,8 @@ def test_shared_action_slot_is_filtered_in_every_layer_and_strip(inspection):
     assert list(module._action_curves(action, None)) == []
 
 
-def test_legacy_geometry_nodes_input_overrides(inspection):
+@pytest.mark.parametrize("input_type", ["VALUE", "ATTRIBUTE"])
+def test_geometry_nodes_input_overrides(inspection, input_type):
     module, bpy = inspection
     bpy.types.Modifier = SimpleNamespace(bl_rna=SimpleNamespace(properties={}))
     socket = SimpleNamespace(
@@ -128,7 +129,15 @@ def test_legacy_geometry_nodes_input_overrides(inspection):
         default_value=1,
     )
 
-    class Modifier(dict):
+    geometry = SimpleNamespace(
+        item_type="SOCKET",
+        in_out="INPUT",
+        name="Geometry",
+        identifier="Socket_0",
+        socket_type="NodeSocketGeometry",
+    )
+
+    class Modifier:
         name = "Nodes"
         type = "NODES"
         show_viewport = show_render = show_in_editmode = True
@@ -138,22 +147,32 @@ def test_legacy_geometry_nodes_input_overrides(inspection):
             name="Group",
             id_type="NODETREE",
             library=None,
-            interface=SimpleNamespace(items_tree=[socket]),
+            interface=SimpleNamespace(items_tree=[geometry, socket]),
+        )
+        properties = SimpleNamespace(
+            inputs=SimpleNamespace(
+                Socket_2=SimpleNamespace(
+                    value=4, type=input_type, attribute_name="height"
+                )
+            )
         )
 
-    mod = Modifier(
-        Socket_2=4, Socket_2_use_attribute=True, Socket_2_attribute_name="height"
-    )
-    result = module._modifier_info(mod, 0)
+    result = module._modifier_info(Modifier(), 0)
     assert result["inputs"]["items"] == [
+        {
+            "name": "Geometry",
+            "identifier": "Socket_0",
+            "socket_type": "NodeSocketGeometry",
+        },
         {
             "name": "Height",
             "identifier": "Socket_2",
             "socket_type": "NodeSocketFloat",
             "value": 4,
-            "use_attribute": True,
+            "type": input_type,
+            "use_attribute": input_type == "ATTRIBUTE",
             "attribute_name": "height",
-        }
+        },
     ]
 
 

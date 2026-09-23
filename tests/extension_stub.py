@@ -45,8 +45,8 @@ def _install_bpy_stubs(monkeypatch, scene):
     handlers.depsgraph_update_post = []
 
     app = types.ModuleType("bpy.app")
-    app.version = (5, 0, 0)
-    app.version_string = "5.0.0"
+    app.version = (5, 2, 0)
+    app.version_string = "5.2.0"
     app.background = False
     app.online_access = True
     app.handlers = handlers

@@ -53,7 +53,7 @@ def test_package_metadata_and_wheels(addon_package):
         assert archive.testzip() is None
         manifest = tomllib.loads(archive.read("blender_manifest.toml").decode())
         assert manifest["version"] == RELEASE_VERSION
-        assert manifest["blender_version_min"] == "5.0.0"
+        assert manifest["blender_version_min"] == "5.2.0"
         assert manifest["license"] == ["SPDX:MIT"]
         assert set(manifest["permissions"]) == {"network", "files"}
         assert json.loads(archive.read("protocol.json"))["version"] == PROTOCOL_VERSION
@@ -248,7 +248,7 @@ info = addon.BlenderMCPServer().get_addon_info()
 assert info["addon_build_version"] == {RELEASE_VERSION!r}, info
 assert info["addon_version"] == {RELEASE_TUPLE!r}, info
 assert info["protocol_version"] == {PROTOCOL_VERSION!r}, info
-assert bpy.app.version >= (5, 0, 0)
+assert bpy.app.version >= (5, 2, 0)
 assert Path(addon.requests.__file__).resolve().is_relative_to(Path({str(tmp_path)!r}).resolve()), addon.requests.__file__
 assert not bpy.app.online_access
 try:
