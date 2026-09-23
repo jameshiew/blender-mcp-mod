@@ -40,7 +40,11 @@ def _value(value):
         return (
             value
             if len(value) <= TEXT_LIMIT
-            else {"value": value[:TEXT_LIMIT], "length": len(value), "truncated": True}
+            else {
+                "value": value[:TEXT_LIMIT],
+                "length": len(value),
+                "details_omitted": True,
+            }
         )
     if isinstance(value, bpy.types.ID):
         return _ref(value)
@@ -49,21 +53,39 @@ def _value(value):
     return (
         values
         if len(items) <= VALUE_LIMIT
-        else {"items": values, "count": len(items), "truncated": True}
+        else {"items": values, "count": len(items), "details_omitted": True}
     )
 
 
-def _page(items, offset, limit, describe=lambda item: item):
+def _details_omitted(value):
+    if isinstance(value, dict):
+        return bool(
+            value.get("details_omitted") or value.get("omitted") or value.get("errors")
+        ) or any(_details_omitted(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_details_omitted(item) for item in value)
+    return False
+
+
+def _page(items, offset, limit, describe=lambda item: item, *, pageable=True):
     total = len(items)
     end = min(offset + limit, total)
+    described = [describe(item) for item in items[offset:end]]
+    remaining = end < total
+    more = remaining and pageable
     return {
         "count": total,
         "offset": offset,
         "limit": limit,
-        "items": [describe(item) for item in items[offset:end]],
-        "next_offset": end if end < total else None,
-        "truncated": total > len(items[offset:end]),
+        "items": described,
+        "next_offset": end if more else None,
+        "has_more": more,
+        "details_omitted": (remaining and not pageable) or _details_omitted(described),
     }
+
+
+def _limited(items, offset, limit, describe=lambda item: item):
+    return _page(items, offset, limit, describe, pageable=False)
 
 
 def _settings(value, skip=(), depth=1):
@@ -91,7 +113,12 @@ def _settings(value, skip=(), depth=1):
                 omitted.append(key)
         except (AttributeError, TypeError, ValueError, RuntimeError) as error:
             errors[key] = str(error)[:256]
-    return {"values": settings, "omitted": omitted, "errors": errors}
+    return {
+        "values": settings,
+        "omitted": omitted,
+        "errors": errors,
+        "details_omitted": bool(omitted or errors) or _details_omitted(settings),
+    }
 
 
 def _slot(slot):
@@ -192,7 +219,7 @@ def _curve_info(curve):
         "mute": curve.mute,
         "is_valid": curve.is_valid,
         "group": curve.group.name if curve.group else None,
-        "modifiers": _page(
+        "modifiers": _limited(
             list(curve.modifiers),
             0,
             20,
@@ -242,7 +269,7 @@ def _describe_animation(entry):
                 "expression": _value(driver.expression),
                 "use_self": driver.use_self,
                 "is_valid": driver.is_valid,
-                "variables": _page(
+                "variables": _limited(
                     list(driver.variables),
                     0,
                     20,
@@ -320,13 +347,13 @@ def _node_info(node):
         "label": node.label,
         "mute": node.mute,
         "settings": _settings(node, skip=bpy.types.Node.bl_rna.properties.keys()),
-        "inputs": _page(
+        "inputs": _limited(
             list(enumerate(node.inputs)),
             0,
             DETAIL_LIMIT,
             lambda pair: _socket_info(pair[1], pair[0]),
         ),
-        "outputs": _page(
+        "outputs": _limited(
             list(enumerate(node.outputs)),
             0,
             DETAIL_LIMIT,
@@ -348,7 +375,7 @@ def _node_info(node):
             "interpolation": ramp.interpolation,
             "color_mode": ramp.color_mode,
             "hue_interpolation": ramp.hue_interpolation,
-            "elements": _page(
+            "elements": _limited(
                 list(ramp.elements),
                 0,
                 DETAIL_LIMIT,
@@ -381,7 +408,7 @@ def _tree_info(tree, offset, limit):
         "node_count": len(nodes),
         "link_count": len(tree.links),
         "nodes": _page(nodes, offset, limit, _node_info),
-        "incoming_links": _page(links, 0, 200, _link_info),
+        "incoming_links": _limited(links, 0, 200, _link_info),
         "animation": _animation_overview(tree),
         "scope": "Nodes sorted by name, with incoming links for this page (up to 200). Socket defaults are stored values, not evaluated shader results. Nested groups are references; inspect them with get_node_group_info. Nested collections and unsupported settings are listed as omitted.",
     }
@@ -412,7 +439,7 @@ def node_group_info(node_group_name, offset=0, limit=20):
     return {
         **_ref(tree),
         **_tree_info(tree, offset, limit),
-        "interface": _page(
+        "interface": _limited(
             sockets,
             0,
             DETAIL_LIMIT,
@@ -474,7 +501,7 @@ def _modifier_info(modifier, index):
             return result
 
         result["node_group"] = _ref(modifier.node_group)
-        result["inputs"] = _page(inputs, 0, DETAIL_LIMIT, input_info)
+        result["inputs"] = _limited(inputs, 0, DETAIL_LIMIT, input_info)
     return result
 
 
@@ -507,10 +534,10 @@ def object_details(obj):
         return result
 
     return {
-        "material_slots": _page(
+        "material_slots": _limited(
             list(enumerate(obj.material_slots)), 0, 20, material_slot
         ),
-        "modifiers": _page(
+        "modifiers": _limited(
             list(enumerate(obj.modifiers)),
             0,
             20,

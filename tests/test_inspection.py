@@ -41,9 +41,9 @@ def test_validation_precedes_blender_data_access(inspection, function, options):
 def test_values_bound_arrays_strings_and_non_finite_numbers(inspection):
     module, _ = inspection
     values = module._value(list(range(100)))
-    assert values == {"items": list(range(16)), "count": 100, "truncated": True}
+    assert values == {"items": list(range(16)), "count": 100, "details_omitted": True}
     text = module._value("x" * 10000)
-    assert text == {"value": "x" * 2048, "length": 10000, "truncated": True}
+    assert text == {"value": "x" * 2048, "length": 10000, "details_omitted": True}
     assert module._value({"B", "A"}) == ["A", "B"]
     json.dumps(module._value([float("nan"), float("inf")]), allow_nan=False)
 
@@ -58,9 +58,33 @@ def test_pagination_only_describes_returned_entries(inspection):
 
     page = module._page(list(range(120)), 20, 10, describe)
     assert calls == list(range(20, 30))
-    assert page["count"] == 120 and page["next_offset"] == 30 and page["truncated"]
+    assert page["count"] == 120 and page["next_offset"] == 30 and page["has_more"]
     assert module._page([1], 2, 10)["items"] == []
     assert module._page([1], 2, 10)["next_offset"] is None
+
+
+@pytest.mark.parametrize(
+    "offset, more", [(0, True), (2, False), (3, False), (10, False)]
+)
+def test_page_availability_is_independent_of_omitted_details(inspection, offset, more):
+    module, _ = inspection
+    rows = [{"settings": {"omitted": ["unsupported"]}} for _ in range(3)]
+    page = module._page(rows, offset, 2)
+    assert page["has_more"] is more
+    assert (page["next_offset"] is not None) is more
+    assert page["details_omitted"] is (offset < 3)
+    assert "truncated" not in page
+    assert not module._page([1, 2, 3], offset, 2)["details_omitted"]
+
+
+def test_fixed_caps_do_not_advertise_inaccessible_pages(inspection):
+    module, _ = inspection
+    page = module._limited(list(range(25)), 0, 20)
+    assert page["count"] == 25 and len(page["items"]) == 20
+    assert page["details_omitted"]
+    assert not page["has_more"] and page["next_offset"] is None
+    parent = module._page([{"children": page}], 0, 20)
+    assert parent["details_omitted"] and not parent["has_more"]
 
 
 def test_shared_action_slot_is_filtered_in_every_layer_and_strip(inspection):
@@ -161,6 +185,7 @@ def test_unsupported_settings_are_explicit_and_reads_do_not_write(inspection):
         "values": {"count": 3},
         "omitted": ["children"],
         "errors": {"broken": "unavailable"},
+        "details_omitted": True,
     }
 
 

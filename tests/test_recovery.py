@@ -30,13 +30,15 @@ def test_summary_distinguishes_rename_from_replacement_and_bounds_lists(recovery
     _, module, _ = recovery
     before = {1: item("Old", geometry="a"), 2: item("Replaced")}
     after = {1: item("New", geometry="b"), 3: item("Replaced"), 4: item("Added")}
-    result = module.compare_objects(before, after, limit=1)
+    result = module.summarize_changes(module.compare_objects(before, after), limit=1)
     assert result["counts"] == {"created": 2, "changed": 1, "removed": 1}
-    assert result["truncated"]
-    assert result["created"] == [{"name": "Added", "type": "MESH", "library": None}]
-    assert result["removed"][0]["name"] == "Replaced"
-    assert result["changed"][0]["previous_name"] == "Old"
-    assert result["changed"][0]["changed_fields"] == ["geometry", "name"]
+    assert result["created"]["has_more"]
+    assert result["created"]["items"] == [
+        {"name": "Added", "type": "MESH", "library": None}
+    ]
+    assert result["removed"]["items"][0]["name"] == "Replaced"
+    assert result["changed"]["items"][0]["previous_name"] == "Old"
+    assert result["changed"]["items"][0]["changed_fields"] == ["geometry", "name"]
 
 
 def test_failed_execution_keeps_checkpoint_output_and_summary(recovery, monkeypatch):
@@ -51,11 +53,13 @@ def test_failed_execution_keeps_checkpoint_output_and_summary(recovery, monkeypa
         checkpoint=True,
         summarize_changes=True,
     )
-    assert not result["executed"]
+    assert not result["succeeded"]
+    assert result["started"] and not result["succeeded"]
+    assert result["partial_changes"] is True
     assert result["result"] == "before failure\n"
     assert "ValueError: deliberate" in result["error_message"]
     assert result["checkpoint"]["checkpoint_id"] == "saved"
-    assert result["changes"]["created"][0]["name"] == "Left behind"
+    assert result["changes"]["created"]["items"][0]["name"] == "Left behind"
     assert server.get_execution_result(result["execution_id"]) == result
     assert server.get_execution_result() == result
 
@@ -72,7 +76,8 @@ def test_final_inspection_error_does_not_mask_script_result(recovery, monkeypatc
     result = server.execute_code(
         "raise ValueError('original')", namespace="task", summarize_changes=True
     )
-    assert not result["executed"]
+    assert not result["succeeded"]
+    assert result["partial_changes"] is None
     assert "original" in result["error_message"]
     assert result["summary_error"] == "Object mode required"
 
@@ -85,10 +90,13 @@ def test_checkpoint_failure_prevents_code_and_namespace_reset(recovery, monkeypa
         raise OSError("Disk full")
 
     monkeypatch.setattr(server, "create_checkpoint", fail)
-    with pytest.raises(OSError, match="Disk full"):
-        server.execute_code(
-            "value = 0", namespace="task", reset_namespace=True, checkpoint=True
-        )
+    result = server.execute_code(
+        "value = 0", namespace="task", reset_namespace=True, checkpoint=True
+    )
+    assert not result["started"] and not result["succeeded"]
+    assert result["partial_changes"] is False
+    assert "Disk full" in result["error_message"]
+    assert server.get_execution_result(result["execution_id"]) == result
     assert server.execute_code("print(value)", namespace="task")["result"] == "7\n"
 
 
@@ -101,6 +109,9 @@ def test_results_retain_only_eight_opted_in_calls(recovery, monkeypatch):
     server.execute_code("pass")
     assert server.get_execution_result() == results[-1]
     assert len(server._execution_results) == 8
+    assert len(server._execution_changes) == 8
+    with pytest.raises(ValueError, match="not found"):
+        server.get_execution_changes(results[0]["execution_id"], "created")
 
 
 @pytest.mark.parametrize("options", [{"checkpoint": 1}, {"summarize_changes": "yes"}])
@@ -144,3 +155,65 @@ def test_summary_requires_object_mode(recovery):
     bpy.context.mode = "EDIT_MESH"
     with pytest.raises(ValueError, match="Object mode"):
         module.capture_objects()
+
+
+def test_full_changes_are_pageable_after_later_scene_edits(recovery, monkeypatch):
+    server, module, _ = recovery
+    captures = iter([{}, {i: item(f"Object {i:03}") for i in range(214)}])
+    monkeypatch.setattr(module, "capture_objects", lambda: next(captures))
+    result = server.execute_code(
+        "raise RuntimeError('partial')", summarize_changes=True
+    )
+    assert result["changes"]["counts"]["created"] == 214
+    assert len(result["changes"]["created"]["items"]) == 100
+    assert result["changes"]["created"]["next_offset"] == 100
+    server.execute_code("later = True")
+    names = []
+    offset = 0
+    while True:
+        page = server.get_execution_changes(
+            result["execution_id"], "created", offset, 80
+        )["changes"]
+        names.extend(row["name"] for row in page["items"])
+        assert not page["details_omitted"]
+        if not page["has_more"]:
+            assert page["next_offset"] is None
+            break
+        offset = page["next_offset"]
+    assert names == [f"Object {i:03}" for i in range(214)]
+    beyond = server.get_execution_changes(result["execution_id"], "created", 999)[
+        "changes"
+    ]
+    assert beyond["items"] == [] and not beyond["has_more"]
+    assert (
+        server.get_execution_changes(result["execution_id"], "removed")["changes"][
+            "count"
+        ]
+        == 0
+    )
+    for options in [
+        {"category": "invalid"},
+        {"category": "created", "offset": True},
+        {"category": "created", "limit": 101},
+    ]:
+        with pytest.raises(ValueError):
+            server.get_execution_changes(result["execution_id"], **options)
+    server.stop()
+    assert not server._execution_changes
+
+
+def test_preparation_and_syntax_failures_remain_retrievable(recovery, monkeypatch):
+    server, module, bpy = recovery
+    syntax = server.execute_code("if True", summarize_changes=True)
+    assert not syntax["started"] and syntax["partial_changes"] is False
+    assert "SyntaxError" in syntax["error_message"]
+    assert server.get_execution_result() == syntax
+    bpy.context.mode = "EDIT_MESH"
+    preparation = server.execute_code(
+        "raise AssertionError('ran')", summarize_changes=True
+    )
+    assert not preparation["started"]
+    assert "Object mode" in preparation["error_message"]
+    assert server.get_execution_result() == preparation
+    with pytest.raises(ValueError, match="No change summary"):
+        server.get_execution_changes(preparation["execution_id"], "created")

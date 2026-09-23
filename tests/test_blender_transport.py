@@ -274,7 +274,10 @@ bpy.context.view_layer.update()
                 },
             )
             assert failed["isError"]
-            message = failed["content"][0]["text"]
+            message = failed["structuredContent"]["error_message"]
+            assert failed["structuredContent"]["started"]
+            assert not failed["structuredContent"]["succeeded"]
+            assert failed["structuredContent"]["partial_changes"] is None
             assert 'File "<blender-mcp>", line 5' in message
             assert "ValueError: native diagnostic" in message
             assert "partial change\n" in message
@@ -351,7 +354,16 @@ bpy.context.view_layer.update()
             )
             assert failed["isError"], failed
             outcome = failed["structuredContent"]
-            assert outcome["changes"]["created"][0]["name"] == "Recovery.Transport"
+            assert (
+                outcome["changes"]["created"]["items"][0]["name"]
+                == "Recovery.Transport"
+            )
+            assert outcome["started"] and outcome["partial_changes"] is True
+            page = call(
+                "get_execution_changes",
+                {"execution_id": outcome["execution_id"], "category": "created"},
+            )["changes"]
+            assert page == outcome["changes"]["created"]
             assert call("get_execution_result", {}) == outcome
             restored = call(
                 "restore_checkpoint", {"checkpoint_id": checkpoint["checkpoint_id"]}

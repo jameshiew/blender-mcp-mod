@@ -10,7 +10,7 @@ from pathlib import Path
 
 import bpy
 
-SUMMARY_SCOPE = "Writable object/data properties, relationships, modifier/constraint settings, material slots, and base mesh positions/topology. Shader contents, animation, mesh attributes, scene settings, external files, and Python state are not compared."
+SUMMARY_SCOPE = "Writable object/data properties, relationships, visibility in all scene view layers, modifier/constraint settings, material slots, and base mesh positions/topology. Shader contents, animation, mesh attributes, scene settings, external files, and Python state are not compared."
 
 
 def _identity(value):
@@ -79,6 +79,7 @@ def capture_objects():
         raise ValueError("Object change summaries require Object mode")
     data_cache = {}
     result = {}
+    view_layers = [layer for scene in bpy.data.scenes for layer in scene.view_layers]
     for obj in bpy.data.objects:
         fields = {
             "properties": _digest(_properties(obj)),
@@ -91,9 +92,11 @@ def capture_objects():
             "custom_properties": _digest(
                 {key: _value(value) for key, value in obj.items()}
             ),
-            "hidden": obj.hide_get()
-            if obj.name in bpy.context.view_layer.objects
-            else None,
+            "hidden": {
+                str(layer.as_pointer()): obj.hide_get(view_layer=layer)
+                for layer in view_layers
+                if obj.name in layer.objects
+            },
         }
         if obj.data is not None:
             key = obj.data.session_uid
@@ -111,7 +114,7 @@ def capture_objects():
     return result
 
 
-def compare_objects(before, after, limit=100):
+def compare_objects(before, after):
     def description(item):
         return {key: item[key] for key in ("name", "type", "library")}
 
@@ -135,22 +138,48 @@ def compare_objects(before, after, limit=100):
                     "changed_fields": fields,
                 }
             )
-    result = {
-        "scope": SUMMARY_SCOPE,
-        "limit_per_category": limit,
-        "counts": {},
-        "truncated": False,
-    }
+    changes = {}
     for name, items in (
         ("created", created),
         ("changed", changed),
         ("removed", removed),
     ):
-        items.sort(key=lambda item: (item["name"], item["library"] or ""))
-        result[name] = items[:limit]
-        result["counts"][name] = len(items)
-        result["truncated"] |= len(items) > limit
-    return result
+        changes[name] = sorted(
+            items, key=lambda item: (item["name"], item["library"] or "")
+        )
+    return changes
+
+
+def change_page(changes, category, offset=0, limit=100):
+    if category not in {"created", "changed", "removed"}:
+        raise ValueError("category must be created, changed, or removed")
+    if type(offset) is not int or offset < 0:
+        raise ValueError("offset must be a non-negative integer")
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError("limit must be an integer from 1 to 100")
+    items = changes[category]
+    end = min(offset + limit, len(items))
+    more = end < len(items)
+    return {
+        "count": len(items),
+        "offset": offset,
+        "limit": limit,
+        "items": items[offset:end],
+        "next_offset": end if more else None,
+        "has_more": more,
+        "details_omitted": False,
+    }
+
+
+def summarize_changes(changes, limit=100):
+    pages = {
+        category: change_page(changes, category, limit=limit) for category in changes
+    }
+    return {
+        "scope": SUMMARY_SCOPE,
+        "counts": {category: len(items) for category, items in changes.items()},
+        **pages,
+    }
 
 
 class Checkpoints:

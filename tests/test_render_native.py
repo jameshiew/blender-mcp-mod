@@ -15,6 +15,7 @@ def test_render_snapshot_image_cancellation_and_scene_preservation(tmp_path, eng
     script = tmp_path / "check_render.py"
     script.write_text(
         """import base64
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -57,10 +58,12 @@ tree.links.new(layers.outputs['Image'], file_output.inputs[0])
 original = (bpy.data.filepath, scene.frame_current, scene.render.filepath,
             scene.render.resolution_percentage, scene.render.image_settings.file_format)
 
-def wait(manager, job_id):
+def wait(manager, job_id, observed=None):
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         status = manager.status(job_id)
+        if observed is not None:
+            observed.append(status)
         if status['state'] not in {'running', 'cancelling'}:
             return status
         time.sleep(0.05)
@@ -79,10 +82,28 @@ try:
     assert base64.b64decode(image['image_data']).startswith(b'\\x89PNG'), image
     original_image = manager.image(first['job_id'], max_size=1000)
     assert (original_image['width'], original_image['height']) == (64, 48)
+    destination = Path(__file__).parent / 'exported image.png'
+    exported = manager.export(first['job_id'], str(destination))
+    assert destination.read_bytes() == base64.b64decode(original_image['image_data'])
+    assert exported['sha256'] == hashlib.sha256(destination.read_bytes()).hexdigest()
+    assert (exported['width'], exported['height']) == (64, 48)
     assert original == (bpy.data.filepath, scene.frame_current, scene.render.filepath,
                         scene.render.resolution_percentage, scene.render.image_settings.file_format)
     assert not file_output.mute
     assert not output_directory.exists(), list(output_directory.iterdir())
+    if RENDER_ENGINE == 'CYCLES':
+        scene.cycles.samples = 512
+        scene.cycles.use_adaptive_sampling = False
+        scene.render.resolution_x = 512
+        scene.render.resolution_y = 512
+        observed = []
+        progressive = manager.start()
+        rendered = wait(manager, progressive['job_id'], observed)
+        assert rendered['state'] == 'completed', rendered
+        samples = [item['progress'] for item in observed if item['state'] == 'running' and item.get('progress') and item['progress']['samples_total']]
+        assert samples, observed
+        assert any(0 < item['sample_fraction'] < 1 for item in samples), samples
+        assert any(item['remaining_seconds'] is not None for item in samples), samples
     second = manager.start()
     cancelled = manager.cancel(second['job_id'])
     assert cancelled['state'] in {'cancelling', 'cancelled'}, cancelled
@@ -93,6 +114,7 @@ try:
     print('RENDER_JOBS_OK', json.dumps(result), json.dumps(cancelled))
 finally:
     manager.close()
+assert destination.is_file()
 """.replace("MODULE_PATH", repr(str(ROOT_ADDON.with_name("render_jobs.py")))).replace(
             "RENDER_ENGINE", repr(engine)
         )

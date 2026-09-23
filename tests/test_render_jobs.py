@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -292,6 +293,7 @@ def test_addon_dispatch_and_stop_own_the_render_manager(renders):
         ("get_render_status", {}),
         ("cancel_render", {"job_id": "unknown"}),
         ("get_render_image", {"job_id": "unknown"}),
+        ("export_render", {"job_id": "unknown", "filepath": "/export.png"}),
     ]:
         assert (
             server.execute_command({"type": command, "params": params})["status"]
@@ -306,3 +308,94 @@ def test_addon_dispatch_and_stop_own_the_render_manager(renders):
     server.stop()
     assert server._render_jobs is None
     assert renders.processes[0].killed == 1
+
+
+def test_export_keeps_full_image_after_job_cleanup(renders, tmp_path):
+    job_id = renders.manager.start()["job_id"]
+    complete(renders, job_id, width=4000, height=2000)
+    destination = tmp_path / "永久 image.png"
+    server = renders.addon.BlenderMCPServer()
+    server._render_jobs = renders.manager
+    result = server.export_render(job_id, str(destination))
+    assert result == {
+        "job_id": job_id,
+        "filepath": str(destination),
+        "format": "png",
+        "width": 4000,
+        "height": 2000,
+        "size_bytes": len(b"render-image"),
+        "sha256": hashlib.sha256(b"render-image").hexdigest(),
+    }
+    renders.manager.close()
+    assert destination.read_bytes() == b"render-image"
+
+
+def test_export_requires_explicit_overwrite_and_does_not_follow_symlinks(
+    renders, tmp_path
+):
+    job_id = renders.manager.start()["job_id"]
+    complete(renders, job_id)
+    destination = tmp_path / "image.png"
+    original = tmp_path / "original.png"
+    original.write_bytes(b"original")
+    destination.symlink_to(original)
+    with pytest.raises(FileExistsError):
+        renders.manager.export(job_id, str(destination))
+    assert destination.is_symlink()
+    assert original.read_bytes() == b"original"
+    renders.manager.export(job_id, str(destination), overwrite=True)
+    assert not destination.is_symlink()
+    assert destination.read_bytes() == b"render-image"
+    assert original.read_bytes() == b"original"
+    assert not list(tmp_path.glob(".blender-mcp-export-*"))
+
+
+def test_failed_export_preserves_destination_and_removes_partial_copy(
+    renders, monkeypatch, tmp_path
+):
+    job_id = renders.manager.start()["job_id"]
+    complete(renders, job_id)
+    destination = tmp_path / "image.png"
+    destination.write_bytes(b"original")
+
+    def fail(source, output):
+        output.write(b"partial")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(renders.module.shutil, "copyfileobj", fail)
+    with pytest.raises(OSError, match="disk full"):
+        renders.manager.export(job_id, str(destination), overwrite=True)
+    assert destination.read_bytes() == b"original"
+    assert not list(tmp_path.glob(".blender-mcp-export-*"))
+
+
+@pytest.mark.parametrize("filepath", ["", "relative.png", "/image.jpg", 42])
+def test_export_rejects_invalid_paths(renders, filepath):
+    with pytest.raises(ValueError, match="path"):
+        renders.manager.export("unknown", filepath)
+
+
+def test_export_rejects_unfinished_jobs_and_temporary_destinations(renders, tmp_path):
+    job_id = renders.manager.start()["job_id"]
+    with pytest.raises(ValueError, match="running"):
+        renders.manager.export(job_id, str(tmp_path / "image.png"))
+    job = complete(renders, job_id)
+    with pytest.raises(ValueError, match="temporary"):
+        renders.manager.export(job_id, str(job.directory / "other.png"))
+    with pytest.raises(ValueError, match="boolean"):
+        renders.manager.export(job_id, str(tmp_path / "image.png"), overwrite=1)
+    with pytest.raises(FileNotFoundError):
+        renders.manager.export(job_id, str(tmp_path / "missing" / "image.png"))
+
+
+def test_progress_is_exposed_and_terminal_jobs_clear_eta(renders):
+    job_id = renders.manager.start()["job_id"]
+    job = renders.manager._jobs[job_id]
+    assert renders.manager.status(job_id)["progress"] is None
+    progress = {"samples_completed": 12, "samples_total": 64, "remaining_seconds": 3.0}
+    (job.directory / "status.json").write_text(
+        json.dumps({"phase": "rendering", "progress": progress})
+    )
+    assert renders.manager.status(job_id)["progress"] == progress
+    renders.manager.cancel(job_id)
+    assert renders.manager.status(job_id)["progress"]["remaining_seconds"] is None

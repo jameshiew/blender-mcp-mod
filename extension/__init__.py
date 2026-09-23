@@ -70,6 +70,7 @@ class BlenderMCPServer:
         self._clients_lock = threading.Lock()
         self._execution_namespaces = {}
         self._execution_results = {}
+        self._execution_changes = {}
         self._checkpoints = None
         self._render_jobs = None
 
@@ -187,6 +188,7 @@ class BlenderMCPServer:
     def stop(self):
         self.running = False
         self._execution_results.clear()
+        self._execution_changes.clear()
 
         if self._render_jobs is not None:
             self._render_jobs.close()
@@ -421,10 +423,12 @@ class BlenderMCPServer:
             "restore_checkpoint": self.restore_checkpoint,
             "delete_checkpoint": self.delete_checkpoint,
             "get_execution_result": self.get_execution_result,
+            "get_execution_changes": self.get_execution_changes,
             "start_render": self.start_render,
             "get_render_status": self.get_render_status,
             "cancel_render": self.cancel_render,
             "get_render_image": self.get_render_image,
+            "export_render": self.export_render,
             "get_sketchfab_status": self.get_sketchfab_status,
         }
 
@@ -480,10 +484,12 @@ class BlenderMCPServer:
                     "restore_checkpoint",
                     "delete_checkpoint",
                     "get_execution_result",
+                    "get_execution_changes",
                     "start_render",
                     "get_render_status",
                     "cancel_render",
                     "get_render_image",
+                    "export_render",
                 ]
             ),
             "blender_version": bpy.app.version_string,
@@ -510,6 +516,11 @@ class BlenderMCPServer:
         if self._render_jobs is None:
             raise ValueError("No render jobs in this server session")
         return self._render_jobs.image(job_id, max_size)
+
+    def export_render(self, job_id, filepath, overwrite=False):
+        if self._render_jobs is None:
+            raise ValueError("No render jobs in this server session")
+        return self._render_jobs.export(job_id, filepath, overwrite)
 
     def get_scene_info(
         self,
@@ -568,7 +579,8 @@ class BlenderMCPServer:
                 "offset": offset,
                 "limit": limit,
                 "next_offset": next_offset,
-                "truncated": next_offset is not None,
+                "has_more": next_offset is not None,
+                "details_omitted": False,
                 "active_object": active_object.name if active_object else None,
                 "mode": bpy.context.mode,
                 "camera": scene.camera.name if scene.camera else None,
@@ -812,6 +824,21 @@ class BlenderMCPServer:
             )
         return self._execution_results[execution_id]
 
+    def get_execution_changes(self, execution_id, category, offset=0, limit=100):
+        from .recovery import SUMMARY_SCOPE, change_page
+
+        self.get_execution_result(execution_id)
+        if execution_id not in self._execution_changes:
+            raise ValueError("No change summary is available for this execution")
+        return {
+            "execution_id": execution_id,
+            "category": category,
+            "scope": SUMMARY_SCOPE,
+            "changes": change_page(
+                self._execution_changes[execution_id], category, offset, limit
+            ),
+        }
+
     def execute_code(
         self,
         code,
@@ -860,32 +887,44 @@ class BlenderMCPServer:
         if recovery:
             import hashlib
             import uuid
-            from .recovery import capture_objects, compare_objects
+            from .recovery import (
+                capture_objects,
+                compare_objects,
+                summarize_changes as summarize,
+            )
 
             execution_id = uuid.uuid4().hex
             code_sha256 = hashlib.sha256(code.encode()).hexdigest()
+        before = saved = None
+        started = False
+        stdout = BoundedOutput()
+        stderr = BoundedOutput()
+        try:
+            compiled = compile(code, "<blender-mcp>", "exec")
             before = capture_objects() if summarize_changes else None
             saved = (
                 self.create_checkpoint(label=f"Before execution {execution_id}")
                 if checkpoint
                 else None
             )
-        if namespace is None:
-            execution_namespace = {"bpy": bpy}
-        else:
-            if reset_namespace:
-                self._execution_namespaces.pop(namespace, None)
-            execution_namespace = self._execution_namespaces.setdefault(
-                namespace, {"bpy": bpy}
-            )
-
-        stdout = BoundedOutput()
-        stderr = BoundedOutput()
-        try:
+            if namespace is None:
+                execution_namespace = {"bpy": bpy}
+            else:
+                if reset_namespace:
+                    self._execution_namespaces.pop(namespace, None)
+                execution_namespace = self._execution_namespaces.setdefault(
+                    namespace, {"bpy": bpy}
+                )
             with redirect_stdout(stdout), redirect_stderr(stderr):
-                exec(compile(code, "<blender-mcp>", "exec"), execution_namespace)
+                started = True
+                exec(compiled, execution_namespace)
 
-            result = {"executed": True, "result": stdout.getvalue()}
+            result = {
+                "started": True,
+                "succeeded": True,
+                "partial_changes": False,
+                "result": stdout.getvalue(),
+            }
         except Exception as e:
             diagnostic = BoundedOutput()
             diagnostic.write(f"{type(e).__name__}\n")
@@ -900,11 +939,15 @@ class BlenderMCPServer:
                     message += f"\n{label}:\n{output.getvalue()}"
                 if output.truncated:
                     message += f"\n[{label} truncated after 16384 characters]"
-            message += "\nChanges made before the error were not rolled back."
-            if not recovery:
-                raise Exception(message) from e
+            message += (
+                "\nChanges made before the error were not rolled back."
+                if started
+                else "\nCode did not start."
+            )
             result = {
-                "executed": False,
+                "started": started,
+                "succeeded": False,
+                "partial_changes": None if started else False,
                 "result": stdout.getvalue(),
                 "error_message": message,
             }
@@ -918,14 +961,20 @@ class BlenderMCPServer:
             result["code_sha256"] = code_sha256
             if saved is not None:
                 result["checkpoint"] = saved
-            if summarize_changes:
+            if summarize_changes and started:
                 try:
-                    result["changes"] = compare_objects(before, capture_objects())
+                    changes = compare_objects(before, capture_objects())
+                    self._execution_changes[execution_id] = changes
+                    result["changes"] = summarize(changes)
+                    if not result["succeeded"] and any(changes.values()):
+                        result["partial_changes"] = True
                 except Exception as error:
                     result["summary_error"] = str(error)[:2048]
             self._execution_results[execution_id] = result
             while len(self._execution_results) > 8:
-                del self._execution_results[next(iter(self._execution_results))]
+                oldest = next(iter(self._execution_results))
+                del self._execution_results[oldest]
+                self._execution_changes.pop(oldest, None)
         return result
 
     def get_sketchfab_status(self):

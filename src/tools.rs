@@ -111,7 +111,7 @@ pub async fn execute(
         result["after_install"] =
             json!("Restart Blender or disable and enable the add-on, then Start MCP Server");
     }
-    let execution_failed = name == "execute_blender_code" && result["executed"] == false;
+    let execution_failed = name == "execute_blender_code" && result["succeeded"] == false;
     let mut response = CallToolResult::structured(result);
     if execution_failed {
         response.is_error = Some(true);
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn catalog_preserves_tools_without_collection_parameters() {
         let tools = definitions().unwrap();
-        assert_eq!(tools.len(), 24);
+        assert_eq!(tools.len(), 26);
         for definition in tools {
             assert!(!definition.tool.name.contains("telemetry"));
             assert!(!definition.tool.name.contains("trajectory"));

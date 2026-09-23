@@ -20,12 +20,22 @@ def test_imports_and_helpers_persist_across_commands():
     )
     assert first == {
         "status": "success",
-        "result": {"executed": True, "result": "defined\n"},
+        "result": {
+            "started": True,
+            "succeeded": True,
+            "partial_changes": False,
+            "result": "defined\n",
+        },
     }
     second = execute(server, "scale = 3\nprint(measure(16))\nprint(bpy is not None)")
     assert second == {
         "status": "success",
-        "result": {"executed": True, "result": "12.0\nTrue\n"},
+        "result": {
+            "started": True,
+            "succeeded": True,
+            "partial_changes": False,
+            "result": "12.0\nTrue\n",
+        },
     }
 
 
@@ -37,8 +47,11 @@ def test_error_preserves_existing_and_partially_executed_state():
         "import sys\nvalues.append(2)\nprint('before failure')\n"
         "print('warning before failure', file=sys.stderr)\nraise ValueError('failed')",
     )
-    assert result["status"] == "error"
-    message = result["message"]
+    assert result["status"] == "success"
+    assert not result["result"]["succeeded"]
+    assert result["result"]["started"]
+    assert result["result"]["partial_changes"] is None
+    message = result["result"]["error_message"]
     assert message.startswith("Code execution error: failed\n")
     assert "ValueError: failed" in message
     assert 'File "<blender-mcp>", line 5' in message
@@ -55,7 +68,13 @@ def test_success_captures_stderr_separately():
     )
     assert result == {
         "status": "success",
-        "result": {"executed": True, "result": "result\n", "stderr": "warning\n"},
+        "result": {
+            "started": True,
+            "succeeded": True,
+            "partial_changes": False,
+            "result": "result\n",
+            "stderr": "warning\n",
+        },
     }
 
 
@@ -80,7 +99,12 @@ def test_exact_output_limit_is_not_reported_as_truncated():
     result = execute(BlenderMCPServer(), "print('x' * 16384, end='')")
     assert result == {
         "status": "success",
-        "result": {"executed": True, "result": "x" * 16_384},
+        "result": {
+            "started": True,
+            "succeeded": True,
+            "partial_changes": False,
+            "result": "x" * 16_384,
+        },
     }
 
 
@@ -90,8 +114,9 @@ def test_failure_includes_bounded_stdout_and_stderr():
         "import sys\nprint('x' * 1_000_000)\n"
         "print('y' * 1_000_000, file=sys.stderr)\nraise RuntimeError('failed')",
     )
-    assert result["status"] == "error"
-    message = result["message"]
+    assert result["status"] == "success"
+    assert not result["result"]["succeeded"]
+    message = result["result"]["error_message"]
     assert 'File "<blender-mcp>", line 4' in message
     assert "RuntimeError: failed" in message
     assert f"stdout:\n{'x' * 16_384}\n[stdout truncated" in message
@@ -101,19 +126,23 @@ def test_failure_includes_bounded_stdout_and_stderr():
 
 def test_large_exception_message_is_bounded():
     result = execute(BlenderMCPServer(), "raise ValueError('x' * 1_000_000)")
-    assert result["status"] == "error"
-    assert "ValueError" in result["message"]
-    assert "[Traceback truncated]" in result["message"]
-    assert len(result["message"]) < 20_000
+    assert result["status"] == "success"
+    assert not result["result"]["succeeded"]
+    assert "ValueError" in result["result"]["error_message"]
+    assert "[Traceback truncated]" in result["result"]["error_message"]
+    assert len(result["result"]["error_message"]) < 20_000
 
 
 def test_syntax_error_reports_script_line_without_executing_code():
     server = BlenderMCPServer()
     execute(server, "value = 7")
     result = execute(server, "value = 9\nif True\n    print(value)")
-    assert result["status"] == "error"
-    message = result["message"]
+    assert result["status"] == "success"
+    assert not result["result"]["succeeded"]
+    message = result["result"]["error_message"]
     assert message.startswith("Code execution error: ")
+    assert not result["result"]["started"]
+    assert result["result"]["partial_changes"] is False
     assert "SyntaxError" in message
     assert 'File "<blender-mcp>", line 2' in message
     assert "if True" in message
@@ -124,8 +153,9 @@ def test_new_server_has_an_independent_namespace():
     first = BlenderMCPServer()
     second = BlenderMCPServer()
     first.execute_code("value = 42", namespace="task-a")
-    with pytest.raises(Exception, match="name 'value' is not defined"):
-        second.execute_code("print(value)", namespace="task-a")
+    result = second.execute_code("print(value)", namespace="task-a")
+    assert not result["succeeded"]
+    assert "name 'value' is not defined" in result["error_message"]
     assert first.execute_code("print(value)", namespace="task-a")["result"] == "42\n"
 
 
@@ -136,16 +166,18 @@ def test_deep_traceback_keeps_origin_from_an_earlier_namespace_command():
         "def leaf():\n    raise ValueError('deep failure')\ndef hop(depth):\n    if depth:\n        return hop(depth - 1)\n    return leaf()",
     )
     result = execute(server, "hop(20)")
-    assert result["status"] == "error"
-    assert 'File "<blender-mcp>", line 2, in leaf' in result["message"]
-    assert "ValueError: deep failure" in result["message"]
+    assert result["status"] == "success"
+    assert not result["result"]["succeeded"]
+    assert 'File "<blender-mcp>", line 2, in leaf' in result["result"]["error_message"]
+    assert "ValueError: deep failure" in result["result"]["error_message"]
 
 
 def test_unnamed_calls_use_fresh_globals():
     server = BlenderMCPServer()
     server.execute_code("value = 42")
-    with pytest.raises(Exception, match="name 'value' is not defined"):
-        server.execute_code("print(value)")
+    result = server.execute_code("print(value)")
+    assert not result["succeeded"]
+    assert "name 'value' is not defined" in result["error_message"]
     execute(server, "named_value = 7")
     assert (
         server.execute_code("print('named_value' in globals())")["result"] == "False\n"

@@ -174,6 +174,8 @@ def run_checks(server):
                 material_name=material.name, offset=offset, limit=2
             )["node_tree"]["nodes"]
             names.extend(node["name"] for node in page["items"])
+            assert page["has_more"] == (page["next_offset"] is not None), page
+            assert "truncated" not in page
             offset = page["next_offset"]
         assert names == sorted(nodes)
         node_group = server.get_node_group_info(node_group_name=group.name)
@@ -221,6 +223,8 @@ def run_checks(server):
                 data_name=obj.name, offset=offset, limit=2
             )["entries"]
             pages.extend(page["items"])
+            assert page["has_more"] == (page["next_offset"] is not None), page
+            assert "truncated" not in page
             offset = page["next_offset"]
         assert pages == entries
         assert (

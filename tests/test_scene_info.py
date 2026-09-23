@@ -114,14 +114,14 @@ def test_scene_pagination_reaches_every_object_in_name_order(monkeypatch):
     assert first["returned_count"] == first["limit"] == 20
     assert first["offset"] == 0
     assert first["next_offset"] == 20
-    assert first["truncated"] is True
+    assert first["has_more"] is True
 
     last = server.get_scene_info(offset=first["next_offset"])
     assert [obj["name"] for obj in last["objects"]] == names[20:]
     assert last["returned_count"] == 5
     assert last["matching_objects"] == 25
     assert last["next_offset"] is None
-    assert last["truncated"] is False
+    assert last["has_more"] is False
 
     past_end = server.get_scene_info(offset=100)
     assert past_end["objects"] == []
@@ -129,7 +129,7 @@ def test_scene_pagination_reaches_every_object_in_name_order(monkeypatch):
     assert past_end["matching_objects"] == 25
     assert past_end["offset"] == 100
     assert past_end["next_offset"] is None
-    assert past_end["truncated"] is False
+    assert past_end["has_more"] is False
 
 
 def test_filters_apply_before_pagination_and_keep_scene_count(monkeypatch):
@@ -200,7 +200,7 @@ def test_empty_unsaved_scene_has_nullable_context(monkeypatch):
     assert result["camera"] is None
     assert result["filepath"] == ""
     assert result["next_offset"] is None
-    assert result["truncated"] is False
+    assert result["has_more"] is False
 
 
 @pytest.mark.parametrize(

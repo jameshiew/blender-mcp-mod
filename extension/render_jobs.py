@@ -1,9 +1,12 @@
 import atexit
 import base64
+import hashlib
 from contextlib import suppress
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import time
@@ -200,11 +203,14 @@ class RenderJobs:
                 (job.finished or time.monotonic()) - job.started, 3
             ),
             "image_available": job.state == "completed",
+            "progress": worker.get("progress"),
         }
         if job.state == "completed":
             result.update(width=worker["width"], height=worker["height"])
         if job.error:
             result["error_message"] = job.error
+        if result["progress"] is not None and job.state != "running":
+            result["progress"] = {**result["progress"], "remaining_seconds": None}
         return result
 
     def cancel(self, job_id):
@@ -252,6 +258,52 @@ class RenderJobs:
             "format": "png",
             "image_data": base64.b64encode(data).decode("ascii"),
         }
+
+    def export(self, job_id, filepath, overwrite=False):
+        if not isinstance(filepath, str) or not filepath:
+            raise ValueError("filepath must be a non-empty absolute PNG path")
+        if type(overwrite) is not bool:
+            raise ValueError("overwrite must be a boolean")
+        destination = Path(filepath).expanduser()
+        if not destination.is_absolute() or destination.suffix.lower() != ".png":
+            raise ValueError("filepath must be an absolute path ending in .png")
+        if destination.resolve().is_relative_to(Path(self._temporary.name).resolve()):
+            raise ValueError("Export outside the temporary render storage")
+        status = self.status(job_id)
+        if status["state"] != "completed":
+            raise ValueError(
+                f"Render job {status['job_id']} is {status['state']}; no image available"
+            )
+        source = self._get(job_id).directory / "render.png"
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=destination.parent, prefix=".blender-mcp-export-", delete=False
+            ) as output:
+                temporary = Path(output.name)
+                with source.open("rb") as image:
+                    shutil.copyfileobj(image, output)
+                output.flush()
+                os.fsync(output.fileno())
+            with temporary.open("rb") as image:
+                checksum = hashlib.file_digest(image, "sha256").hexdigest()
+            size = temporary.stat().st_size
+            if overwrite:
+                os.replace(temporary, destination)
+            else:
+                os.link(temporary, destination)
+            return {
+                "job_id": job_id,
+                "filepath": str(destination),
+                "format": "png",
+                "width": status["width"],
+                "height": status["height"],
+                "size_bytes": size,
+                "sha256": checksum,
+            }
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def close(self):
         for job in self._jobs.values():

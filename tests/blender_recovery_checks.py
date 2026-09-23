@@ -34,6 +34,36 @@ def run_checks(server, directory):
     assert before["changes"]["counts"] == {"created": 0, "changed": 0, "removed": 0}, (
         before
     )
+    original_scene = bpy.context.scene
+    other_layer = original_scene.view_layers.new("Recovery.SecondLayer")
+    other_layer.update()
+    switched = server.execute_code(
+        "bpy.context.window.scene = bpy.data.scenes.new('Recovery.OtherScene')",
+        summarize_changes=True,
+    )
+    assert switched["succeeded"] and switched["changes"]["counts"]["changed"] == 0, (
+        switched
+    )
+    bpy.context.window.scene = original_scene
+    visibility = server.execute_code(
+        "bpy.data.objects['Recovery.Cube'].hide_set(True, view_layer=bpy.context.scene.view_layers['Recovery.SecondLayer'])",
+        summarize_changes=True,
+    )
+    assert visibility["changes"]["counts"]["changed"] == 1, visibility
+    assert "hidden" in visibility["changes"]["changed"]["items"][0]["changed_fields"]
+    cube.hide_set(False, view_layer=other_layer)
+    many = server.execute_code(
+        "for i in range(214):\n    bpy.context.collection.objects.link(bpy.data.objects.new(f'Paging.{i:03}', None))",
+        summarize_changes=True,
+    )
+    assert many["succeeded"] and many["changes"]["created"]["count"] == 214, many
+    last = server.get_execution_changes(many["execution_id"], "created", offset=200)[
+        "changes"
+    ]
+    assert len(last["items"]) == 14 and not last["has_more"], last
+    for obj in list(bpy.data.objects):
+        if obj.name.startswith("Paging."):
+            bpy.data.objects.remove(obj, do_unlink=True)
     result = server.execute_code(
         """obj = bpy.data.objects['Recovery.Cube']
 obj.name = 'Recovery.Renamed'
@@ -52,12 +82,13 @@ raise ValueError('deliberate recovery test')
         checkpoint=True,
         summarize_changes=True,
     )
-    assert not result["executed"], result
+    assert not result["succeeded"], result
+    assert result["started"] and result["partial_changes"] is True, result
     changes = result["changes"]
     assert changes["counts"] == {"created": 1, "changed": 1, "removed": 1}, changes
-    assert changes["created"][0]["name"] == "Recovery.Created"
-    assert changes["removed"][0]["name"] == "Recovery.Remove"
-    changed = changes["changed"][0]
+    assert changes["created"]["items"][0]["name"] == "Recovery.Created"
+    assert changes["removed"]["items"][0]["name"] == "Recovery.Remove"
+    changed = changes["changed"]["items"][0]
     assert changed["previous_name"] == "Recovery.Cube"
     assert {
         "name",

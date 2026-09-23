@@ -12,7 +12,7 @@
   },
   {
     "name": "get_scene_info",
-    "description": "Inspect the active scene, mode, selection, camera, units, and a page of objects sorted by name. Defaults to 20 objects; use next_offset with the same filters to continue until null. Filters combine with AND. Pages reflect live scene state: restart at offset 0 after adding, removing, or renaming objects. Use get_object_info for full transforms, bounds, and modifiers.",
+    "description": "Inspect the active scene, mode, selection, camera, units, and a page of objects sorted by name. Defaults to 20 objects; use next_offset with the same filters to continue until null. Filters combine with AND. Pages reflect live scene state: restart at offset 0 after adding, removing, or renaming objects. Use get_object_info for full transforms, bounds, and modifiers. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -48,7 +48,7 @@
   },
   {
     "name": "get_object_info",
-    "description": "Inspect an object by exact name: local transforms, world matrix and location, dimensions, parent, collections, modifiers, visibility, materials, and mesh counts/bounds. Local location and Euler rotation (radians) are relative to the parent; use matrix_world for the full world transform. Top-level mesh counts describe the base mesh; bounds and dimensions use cached object bounds. With evaluated=true, adds evaluated data for the current frame and viewport dependency graph: mesh counts after modifiers, instance sources with per-copy mesh counts, mesh_including_instances totals, and world bounds/dimensions including generated instances. Evaluated bounds enclose transformed local mesh bounds. Meshes, curves, surfaces, text, and metaballs contribute mesh geometry; other types have null mesh, and bounds/dimensions are null when there are no vertices. Requires the object in the active view layer dependency graph. May be expensive for dense geometry. Camera objects also include projection, lens in millimetres, field-of-view angles in radians, sensor size/fit, shift, clipping, active-camera state, and depth-of-field settings.",
+    "description": "Inspect an object by exact name: local transforms, world matrix and location, dimensions, parent, collections, modifiers, visibility, materials, and mesh counts/bounds. Local location and Euler rotation (radians) are relative to the parent; use matrix_world for the full world transform. Top-level mesh counts describe the base mesh; bounds and dimensions use cached object bounds. With evaluated=true, adds evaluated data for the current frame and viewport dependency graph: mesh counts after modifiers, instance sources with per-copy mesh counts, mesh_including_instances totals, and world bounds/dimensions including generated instances. Evaluated bounds enclose transformed local mesh bounds. Meshes, curves, surfaces, text, and metaballs contribute mesh geometry; other types have null mesh, and bounds/dimensions are null when there are no vertices. Requires the object in the active view layer dependency graph. May be expensive for dense geometry. Camera objects also include projection, lens in millimetres, field-of-view angles in radians, sensor size/fit, shift, clipping, active-camera state, and depth-of-field settings. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -75,7 +75,7 @@
   },
   {
     "name": "get_material_info",
-    "description": "Inspect a material's settings, shader nodes, socket defaults, incoming links, image references/colorspaces, color ramps, and animation overview. Nodes are sorted by name; follow node_tree.nodes.next_offset with the same material to continue. Defaults to 20 nodes. Stored socket defaults are not evaluated shader output and may be unused when linked. Nested groups are references: use get_node_group_info for their contents. Material animation and shader animation are separate; use get_animation_info with MATERIAL or MATERIAL_NODES. Settings list omitted collections and read errors. Nested details cap at 64 sockets/settings, 16 array elements, and 2048 text characters; incoming links cap at 200 per page with explicit truncation. Does not change frames, compile shaders, load assets, or execute drivers.",
+    "description": "Inspect a material's settings, shader nodes, socket defaults, incoming links, image references/colorspaces, color ramps, and animation overview. Nodes are sorted by name; follow node_tree.nodes.next_offset with the same material to continue. Defaults to 20 nodes. Stored socket defaults are not evaluated shader output and may be unused when linked. Nested groups are references: use get_node_group_info for their contents. Material animation and shader animation are separate; use get_animation_info with MATERIAL or MATERIAL_NODES. Settings list omitted collections and read errors. Nested details cap at 64 sockets/settings, 16 array elements, and 2048 text characters; incoming links cap at 200 per page with details_omitted when capped. Does not change frames, compile shaders, load assets, or execute drivers. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -89,7 +89,7 @@
   },
   {
     "name": "get_node_group_info",
-    "description": "Inspect a shader or geometry node group by exact name, including its interface, node settings, sockets, incoming links, and animation overview. Nested groups stay as named references so recursive graphs cannot expand indefinitely. Follow nodes.next_offset to page nodes sorted by name. Uses the same nested-detail limits as get_material_info; interface sockets cap at 64 with explicit truncation. Geometry-node modifier input overrides are available from get_modifier_info.",
+    "description": "Inspect a shader or geometry node group by exact name, including its interface, node settings, sockets, incoming links, and animation overview. Nested groups stay as named references so recursive graphs cannot expand indefinitely. Follow nodes.next_offset to page nodes sorted by name. Uses the same nested-detail limits as get_material_info; interface sockets cap at 64 with details_omitted when capped. Geometry-node modifier input overrides are available from get_modifier_info. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -103,7 +103,7 @@
   },
   {
     "name": "get_modifier_info",
-    "description": "Inspect one modifier by exact object and modifier names: stack index, viewport/render flags, writable scalar/vector settings, data-block references, and one level of nested settings. Geometry Nodes includes the node-group name, input overrides, and attribute-input switches. Lists omitted collections and read errors; caps settings/inputs at 64 and arrays at 16 elements with explicit truncation. Reports stored values at the current frame without applying modifiers or updating the dependency graph. Use get_object_info(evaluated=true) for the resulting geometry and get_animation_info for animated modifier channels on the object.",
+    "description": "Inspect one modifier by exact object and modifier names: stack index, viewport/render flags, writable scalar/vector settings, data-block references, and one level of nested settings. Geometry Nodes includes the node-group name, input overrides, and attribute-input switches. Lists omitted collections and read errors; caps settings/inputs at 64 and arrays at 16 elements with details_omitted when capped. Reports stored values at the current frame without applying modifiers or updating the dependency graph. Use get_object_info(evaluated=true) for the resulting geometry and get_animation_info for animated modifier channels on the object. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -116,7 +116,7 @@
   },
   {
     "name": "get_animation_info",
-    "description": "Inspect animation without changing the frame or evaluating drivers. Returns the assigned action/slot and paginated entries: active-action channels, drivers, NLA tracks, strips, strip-control channels, and NLA action channels. Includes only the owner's assigned slot from shared actions, across all layers/strips. Channel summaries give paths, component indices, frame ranges, keyframe/sample counts, interpolation counts, mute/validity, and F-curve modifiers. Drivers include expression and target references; NLA strips include scene ranges, action ranges, blending, influence, and repeat/scale. Channel ranges use action-local frames; strip ranges use scene frames. Follow entries.next_offset with the same owner. Nested F-curve modifiers and driver variables cap at 20; settings cap at 64 and text at 2048 with explicit truncation. Does not inspect constraints, simulation caches, or evaluated motion.",
+    "description": "Inspect animation without changing the frame or evaluating drivers. Returns the assigned action/slot and paginated entries: active-action channels, drivers, NLA tracks, strips, strip-control channels, and NLA action channels. Includes only the owner's assigned slot from shared actions, across all layers/strips. Channel summaries give paths, component indices, frame ranges, keyframe/sample counts, interpolation counts, mute/validity, and F-curve modifiers. Drivers include expression and target references; NLA strips include scene ranges, action ranges, blending, influence, and repeat/scale. Channel ranges use action-local frames; strip ranges use scene frames. Follow entries.next_offset with the same owner. Nested F-curve modifiers and driver variables cap at 20; settings cap at 64 and text at 2048 with details_omitted when capped. Does not inspect constraints, simulation caches, or evaluated motion. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -337,7 +337,7 @@
   },
   {
     "name": "execute_blender_code",
-    "description": "Execute Python on Blender's main thread with bpy already available. Prefer bpy.data for edits; bpy.ops may require a specific mode, selection, or context override. Print concise results: expressions are not returned automatically. Python stdout/stderr are limited to 16,384 characters each. Errors include traceback and output; earlier changes are not rolled back. Optional checkpoint saves a .blend copy before execution; summarize_changes reports created, changed, and removed objects, including on failure. Either option adds an execution_id retrievable with get_execution_result. A timeout does not cancel execution: inspect before retrying. Without namespace, globals are fresh each call. A task-specific namespace preserves imports, variables, and helpers until reset, checkpoint restoration, or server restart. Namespaces separate globals only; Blender data and imported modules are shared.",
+    "description": "Execute Python on Blender's main thread with bpy already available. Prefer bpy.data for edits; bpy.ops can require mode, selection, or context overrides. Print concise results; stdout/stderr are limited to 16,384 characters each. Results include started and succeeded. partial_changes is true when a failed script changed inspected objects, false when code did not start or succeeded, and null when a failed script may have effects outside inspection. Errors include traceback and output; changes are not rolled back. Optional checkpoint saves a .blend copy before execution. summarize_changes returns the first 100 changes per category; use get_execution_changes for remaining pages. Either option adds an execution_id retrievable with get_execution_result, including preparation failures. A timeout does not cancel execution: inspect before retrying. Without namespace, globals are fresh each call. A task-specific namespace preserves globals until reset, checkpoint restoration, or server restart. Namespaces separate globals only; Blender data and imported modules are shared.",
     "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": true},
     "inputSchema": {
       "type": "object",
@@ -362,7 +362,7 @@
         },
         "summarize_changes": {
           "type": "boolean",
-          "description": "Compare objects before and after execution (default false). Requires Object mode initially; reports summary_error if the final state cannot be inspected. Covers writable object/data properties, relationships, modifier/constraint settings, material slots, and base mesh positions/topology. Excludes shader contents, animation, mesh attributes, scene settings, external files, and Python state. Full counts with at most 100 names per category; scans all objects and mesh geometry, which can be costly."
+          "description": "Compare objects before and after execution (default false). Requires Object mode initially; reports summary_error if the final state cannot be inspected. Covers writable object/data properties, relationships, modifier/constraint settings, material slots, and base mesh positions/topology. Excludes shader contents, animation, mesh attributes, scene settings, external files, and Python state. Full counts with the first 100 names per category; use get_execution_changes for more. Visibility is compared across all scene view layers. Scans all objects and mesh geometry, which can be costly."
         }
       },
       "required": [
@@ -416,7 +416,7 @@
   },
   {
     "name": "get_execution_result",
-    "description": "Retrieve a completed execute_blender_code result that used checkpoint or summarize_changes, including any error, output, checkpoint, and change summary. Omit execution_id for the most recent opted-in result, which can belong to another client: verify namespace and code_sha256. The last eight results are retained in memory until the add-on server restarts. After a timeout, retrieve and inspect before retrying; this command waits behind running Python and does not cancel it. A successful retrieval can contain executed=false from the original failed script.",
+    "description": "Retrieve a completed execute_blender_code result that used checkpoint or summarize_changes, including preparation or script errors, started, succeeded, partial_changes, output, checkpoint, and initial change pages. Omit execution_id for the latest opted-in result, which can belong to another client: verify namespace and code_sha256. Use get_execution_changes with this execution_id to retrieve additional changes. The last eight results and their full change lists are retained until the add-on server stops. After a timeout, retrieve and inspect before retrying; this command waits behind running Python and does not cancel it. A successful retrieval can contain succeeded=false from the original execution.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -426,7 +426,7 @@
   },
   {
     "name": "start_render",
-    "description": "Render one still frame from a snapshot in a separate Blender process. Returns a job_id immediately after the snapshot is written; poll get_render_status, then use get_render_image. Uses the scene's active camera and render settings without changing the open scene. Optional resolution_percentage applies only to this job. Only one job can run at a time. External assets and caches must be saved on disk; Python auto-execution and compositor file-output nodes are disabled in the worker. The latest eight jobs are retained until the add-on server stops. A client timeout does not cancel a job; call get_render_status without job_id to find the latest job before retrying.",
+    "description": "Render one still frame from a snapshot in a separate Blender process. Returns a job_id immediately after the snapshot is written; poll get_render_status, then use get_render_image to preview or export_render to save the full-resolution PNG. Uses the scene's active camera and render settings without changing the open scene. Optional resolution_percentage applies only to this job. Only one job can run at a time. External assets and caches must be saved on disk; Python auto-execution and compositor file-output nodes are disabled in the worker. The latest eight jobs are retained until the add-on server stops. A client timeout does not cancel a job; call get_render_status without job_id to find the latest job before retrying.",
     "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -441,7 +441,7 @@
   },
   {
     "name": "get_render_status",
-    "description": "Get a render job's state, phase, elapsed time, scene, frame, and image availability. States are running, cancelling, completed, cancelled, and failed. A failed job includes error_message. Omit job_id to inspect the latest job, including after an uncertain start_render response. Jobs expire when the add-on server stops or eight newer jobs have started.",
+    "description": "Get a render job's state, phase, elapsed time, scene, frame, image availability, and progress. States are running, cancelling, completed, cancelled, and failed. progress is null until the engine reports statistics; otherwise it includes status_text, the latest samples_completed/samples_total, sample_fraction, and remaining_seconds. Counts describe the most recent sampling stage and can reset for another layer or tile; sample_fraction is not overall job completion. Remaining time is an engine estimate for the current stage. Unavailable values are null. A failed job includes error_message. Omit job_id for the latest job. Jobs expire when the add-on server stops or eight newer jobs have started; use export_render to keep a completed image.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -557,6 +557,83 @@
       "required": [
         "uid",
         "target_size"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "export_render",
+    "description": "Save a completed job's full-resolution PNG on the Blender machine. Copies the original bytes without resizing or changing the open scene. The destination parent directory must exist. Refuses existing paths unless overwrite=true; publishing the file is atomic. Returns filepath, dimensions, size_bytes, and sha256. Exported files survive job expiry and server restarts. Running, failed, cancelled, and expired jobs return an error.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Exact job ID returned by start_render."
+        },
+        "filepath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Absolute destination path ending in .png on the Blender machine. A leading ~ is expanded."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "default": false,
+          "description": "Replace an existing destination file (default false)."
+        }
+      },
+      "required": [
+        "job_id",
+        "filepath"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_execution_changes",
+    "description": "Page through the complete, immutable object changes captured by an execute_blender_code call with summarize_changes=true, including failed scripts. Requires its exact execution_id and one category: created, changed, or removed. Follow changes.next_offset while changes.has_more is true. Lists use the same stable name/library ordering as the initial summary. Results expire with the execution result after eight newer opted-in calls or a server stop. Reports an error if the execution has no successful change summary. Inspection scope is returned with each page.",
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "execution_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "created",
+            "changed",
+            "removed"
+          ]
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        }
+      },
+      "required": [
+        "execution_id",
+        "category"
       ],
       "additionalProperties": false
     }

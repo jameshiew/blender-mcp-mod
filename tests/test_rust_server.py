@@ -236,6 +236,18 @@ CASES = [
         {"checkpoint_id": "a" * 32},
     ),
     ("get_execution_result", {}, "get_execution_result", {}),
+    (
+        "get_execution_changes",
+        {"execution_id": "a" * 32, "category": "created", "offset": 100},
+        "get_execution_changes",
+        {"execution_id": "a" * 32, "category": "created", "offset": 100, "limit": 100},
+    ),
+    (
+        "export_render",
+        {"job_id": "job", "filepath": "/tmp/full image.png"},
+        "export_render",
+        {"job_id": "job", "filepath": "/tmp/full image.png", "overwrite": False},
+    ),
     ("get_addon_status", {}, "get_addon_info", {}),
     ("get_scene_info", {}, "get_scene_info", {}),
     (
@@ -342,7 +354,9 @@ def test_all_tools_over_stdio_and_tcp(client):
 
 def test_structured_execution_failure_survives_mcp_transport(client, monkeypatch):
     outcome = {
-        "executed": False,
+        "started": True,
+        "succeeded": False,
+        "partial_changes": True,
         "error_message": "deliberate",
         "execution_id": "a" * 32,
         "checkpoint": {"checkpoint_id": "b" * 32},
@@ -363,6 +377,33 @@ def test_structured_execution_failure_survives_mcp_transport(client, monkeypatch
     assert result["structuredContent"] == outcome
     assert json.loads(result["content"][0]["text"]) == outcome
     assert client.commands[-1]["params"]["checkpoint"] is True
+
+
+@pytest.mark.parametrize(
+    "name, arguments",
+    [
+        ("export_render", {"job_id": "job"}),
+        ("export_render", {"job_id": "job", "filepath": ""}),
+        (
+            "export_render",
+            {"job_id": "job", "filepath": "/tmp/image.png", "overwrite": "yes"},
+        ),
+        ("get_execution_changes", {"execution_id": "a" * 32, "category": "all"}),
+        (
+            "get_execution_changes",
+            {"execution_id": "a" * 32, "category": "created", "offset": -1},
+        ),
+        (
+            "get_execution_changes",
+            {"execution_id": "a" * 32, "category": "created", "limit": 101},
+        ),
+    ],
+)
+def test_export_and_change_page_schemas_reject_invalid_arguments(
+    client, name, arguments
+):
+    assert client.call(name, arguments)["isError"]
+    assert not client.commands
 
 
 def test_tool_annotations_distinguish_inspection_edits_and_network(client):
@@ -521,7 +562,7 @@ def test_execution_diagnostics_reach_mcp_and_allow_recovery(client):
         },
     )
     assert result["isError"]
-    message = result["content"][0]["text"]
+    message = result["structuredContent"]["error_message"]
     assert 'File "<blender-mcp>", line 5' in message
     assert "ValueError: fix me" in message
     assert "before failure\n" in message
