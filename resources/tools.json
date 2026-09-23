@@ -277,7 +277,7 @@
   },
   {
     "name": "execute_blender_code",
-    "description": "Execute Python on Blender's main thread with bpy already available. Prefer bpy.data for edits; bpy.ops may require a specific mode, selection, or context override. Print concise results: expressions are not returned automatically. Python stdout/stderr are limited to 16,384 characters each and truncation is reported. Errors include script traceback and output; earlier changes are not rolled back. A timeout does not cancel execution: inspect before retrying. Without namespace, globals are fresh each call. Reusing a task-specific namespace preserves imports, variables, and helpers until reset or server restart. Namespaces separate globals only; Blender data and imported modules are shared.",
+    "description": "Execute Python on Blender's main thread with bpy already available. Prefer bpy.data for edits; bpy.ops may require a specific mode, selection, or context override. Print concise results: expressions are not returned automatically. Python stdout/stderr are limited to 16,384 characters each. Errors include traceback and output; earlier changes are not rolled back. Optional checkpoint saves a .blend copy before execution; summarize_changes reports created, changed, and removed objects, including on failure. Either option adds an execution_id retrievable with get_execution_result. A timeout does not cancel execution: inspect before retrying. Without namespace, globals are fresh each call. A task-specific namespace preserves imports, variables, and helpers until reset, checkpoint restoration, or server restart. Namespaces separate globals only; Blender data and imported modules are shared.",
     "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": true},
     "inputSchema": {
       "type": "object",
@@ -295,6 +295,14 @@
         "reset_namespace": {
           "type": "boolean",
           "description": "Clear this namespace before executing code; requires namespace when true. Use empty code to release stored variables when finished."
+        },
+        "checkpoint": {
+          "type": "boolean",
+          "description": "Save a checkpoint before running code (default false). Requires Object mode and a free checkpoint slot; if saving fails, code does not run. Returns checkpoint metadata on success or failure. Does not roll back automatically. External files and Python state are not saved."
+        },
+        "summarize_changes": {
+          "type": "boolean",
+          "description": "Compare objects before and after execution (default false). Requires Object mode initially; reports summary_error if the final state cannot be inspected. Covers writable object/data properties, relationships, modifier/constraint settings, material slots, and base mesh positions/topology. Excludes shader contents, animation, mesh attributes, scene settings, external files, and Python state. Full counts with at most 100 names per category; scans all objects and mesh geometry, which can be costly."
         }
       },
       "required": [
@@ -306,6 +314,54 @@
         "required": ["reset_namespace"]
       },
       "then": {"required": ["namespace"]}
+    }
+  },
+  {
+    "name": "create_checkpoint",
+    "description": "Save a persistent .blend checkpoint without overwriting or changing the current document path. Requires Object mode. Stores up to 32 checkpoints in the Blender MCP config directory; use list_checkpoints and delete_checkpoint to manage them. External assets must already be saved on disk; linked files, caches, external side effects, and Python state are not copied. Save failures prevent execution when requested through execute_blender_code.",
+    "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {"label": {"type": "string", "minLength": 1, "maxLength": 128}},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_checkpoints",
+    "description": "List saved checkpoint IDs, labels, timestamps, original file paths, file sizes, and object counts. Checkpoints persist across Blender restarts. Restored working copies are separate files and are not listed or deleted by checkpoint management.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
+    "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
+  },
+  {
+    "name": "restore_checkpoint",
+    "description": "Replace the open Blender document with a working copy of a checkpoint. First saves the current document as a safety checkpoint; requires Object mode and one free checkpoint slot. Clears all execution namespaces. Preserves the current UI, disables file Python auto-execution, and keeps MCP connected. The working copy becomes the current file path; use Save As to save elsewhere. Original files and checkpoint snapshots remain intact. Does not undo external file/network effects, running render jobs, or Python callbacks. Refuses a checkpoint whose saved checksum changed.",
+    "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {"checkpoint_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+      "required": ["checkpoint_id"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "delete_checkpoint",
+    "description": "Permanently remove one checkpoint snapshot and its metadata to free storage. Does not change the open scene or remove restored working copies. Refuses to delete a snapshot opened directly as the current file.",
+    "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {"checkpoint_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+      "required": ["checkpoint_id"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_execution_result",
+    "description": "Retrieve a completed execute_blender_code result that used checkpoint or summarize_changes, including any error, output, checkpoint, and change summary. Omit execution_id for the most recent opted-in result, which can belong to another client: verify namespace and code_sha256. The last eight results are retained in memory until the add-on server restarts. After a timeout, retrieve and inspect before retrying; this command waits behind running Python and does not cancel it. A successful retrieval can contain executed=false from the original failed script.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {"execution_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+      "additionalProperties": false
     }
   },
   {

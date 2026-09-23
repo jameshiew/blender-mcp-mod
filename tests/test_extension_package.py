@@ -63,6 +63,7 @@ def test_package_metadata_and_wheels(addon_package):
         for filename in (
             "geometry.py",
             "view.py",
+            "recovery.py",
             "render_jobs.py",
             "render_worker.py",
         ):
@@ -84,6 +85,7 @@ def test_package_metadata_and_wheels(addon_package):
             "__init__.py",
             "geometry.py",
             "view.py",
+            "recovery.py",
             "render_jobs.py",
             "render_worker.py",
             "blender_manifest.toml",

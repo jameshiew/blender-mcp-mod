@@ -69,6 +69,8 @@ class BlenderMCPServer:
         self._clients = set()
         self._clients_lock = threading.Lock()
         self._execution_namespaces = {}
+        self._execution_results = {}
+        self._checkpoints = None
         self._render_jobs = None
 
     def _load_tls_context(self):
@@ -184,6 +186,7 @@ class BlenderMCPServer:
 
     def stop(self):
         self.running = False
+        self._execution_results.clear()
 
         if self._render_jobs is not None:
             self._render_jobs.close()
@@ -409,6 +412,11 @@ class BlenderMCPServer:
             "set_viewport": self.set_viewport,
             "get_viewport_screenshot": self.get_viewport_screenshot,
             "execute_code": self.execute_code,
+            "create_checkpoint": self.create_checkpoint,
+            "list_checkpoints": self.list_checkpoints,
+            "restore_checkpoint": self.restore_checkpoint,
+            "delete_checkpoint": self.delete_checkpoint,
+            "get_execution_result": self.get_execution_result,
             "start_render": self.start_render,
             "get_render_status": self.get_render_status,
             "cancel_render": self.cancel_render,
@@ -459,6 +467,11 @@ class BlenderMCPServer:
                     "set_viewport",
                     "get_viewport_screenshot",
                     "execute_code",
+                    "create_checkpoint",
+                    "list_checkpoints",
+                    "restore_checkpoint",
+                    "delete_checkpoint",
+                    "get_execution_result",
                     "start_render",
                     "get_render_status",
                     "cancel_render",
@@ -726,7 +739,52 @@ class BlenderMCPServer:
         except Exception as error:
             return {"error": str(error)}
 
-    def execute_code(self, code, namespace=None, reset_namespace=False):
+    def _checkpoint_store(self):
+        if self._checkpoints is None:
+            from .recovery import Checkpoints
+
+            directory = self.config_dir or os.environ.get(
+                "BLENDER_MCP_CONFIG_DIR", str(Path.home() / ".blender-mcp")
+            )
+            self._checkpoints = Checkpoints(Path(directory) / "checkpoints")
+        return self._checkpoints
+
+    def create_checkpoint(self, label=None):
+        return self._checkpoint_store().create(label)
+
+    def list_checkpoints(self):
+        return self._checkpoint_store().list()
+
+    def restore_checkpoint(self, checkpoint_id):
+        result = self._checkpoint_store().restore(
+            checkpoint_id, self._execution_namespaces.clear
+        )
+        bpy.context.scene.blendermcp_server_running = self.running
+        return result
+
+    def delete_checkpoint(self, checkpoint_id):
+        return self._checkpoint_store().delete(checkpoint_id)
+
+    def get_execution_result(self, execution_id=None):
+        if execution_id is None:
+            execution_id = next(reversed(self._execution_results), None)
+        if (
+            not isinstance(execution_id, str)
+            or execution_id not in self._execution_results
+        ):
+            raise ValueError(
+                "Execution result not found; only the last 8 opted-in calls in this server session are retained"
+            )
+        return self._execution_results[execution_id]
+
+    def execute_code(
+        self,
+        code,
+        namespace=None,
+        reset_namespace=False,
+        checkpoint=False,
+        summarize_changes=False,
+    ):
         """Execute arbitrary Blender Python code"""
         from contextlib import redirect_stderr
 
@@ -761,6 +819,22 @@ class BlenderMCPServer:
             raise Exception(
                 "Code execution error: reset_namespace requires a namespace"
             )
+        if type(checkpoint) is not bool or type(summarize_changes) is not bool:
+            raise ValueError("checkpoint and summarize_changes must be booleans")
+        recovery = checkpoint or summarize_changes
+        if recovery:
+            import hashlib
+            import uuid
+            from .recovery import capture_objects, compare_objects
+
+            execution_id = uuid.uuid4().hex
+            code_sha256 = hashlib.sha256(code.encode()).hexdigest()
+            before = capture_objects() if summarize_changes else None
+            saved = (
+                self.create_checkpoint(label=f"Before execution {execution_id}")
+                if checkpoint
+                else None
+            )
         if namespace is None:
             execution_namespace = {"bpy": bpy}
         else:
@@ -777,11 +851,6 @@ class BlenderMCPServer:
                 exec(compile(code, "<blender-mcp>", "exec"), execution_namespace)
 
             result = {"executed": True, "result": stdout.getvalue()}
-            if stderr.getvalue():
-                result["stderr"] = stderr.getvalue()
-            if stdout.truncated or stderr.truncated:
-                result["output_truncated"] = True
-            return result
         except Exception as e:
             diagnostic = BoundedOutput()
             diagnostic.write(f"{type(e).__name__}\n")
@@ -797,7 +866,32 @@ class BlenderMCPServer:
                 if output.truncated:
                     message += f"\n[{label} truncated after 16384 characters]"
             message += "\nChanges made before the error were not rolled back."
-            raise Exception(message) from e
+            if not recovery:
+                raise Exception(message) from e
+            result = {
+                "executed": False,
+                "result": stdout.getvalue(),
+                "error_message": message,
+            }
+        if stderr.getvalue():
+            result["stderr"] = stderr.getvalue()
+        if stdout.truncated or stderr.truncated:
+            result["output_truncated"] = True
+        if recovery:
+            result["execution_id"] = execution_id
+            result["namespace"] = namespace
+            result["code_sha256"] = code_sha256
+            if saved is not None:
+                result["checkpoint"] = saved
+            if summarize_changes:
+                try:
+                    result["changes"] = compare_objects(before, capture_objects())
+                except Exception as error:
+                    result["summary_error"] = str(error)[:2048]
+            self._execution_results[execution_id] = result
+            while len(self._execution_results) > 8:
+                del self._execution_results[next(iter(self._execution_results))]
+        return result
 
     def get_sketchfab_status(self):
         """Get the current status of Sketchfab integration"""

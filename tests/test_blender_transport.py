@@ -57,7 +57,7 @@ def finish():
         return None
     return 0.1
 
-bpy.app.timers.register(finish)
+bpy.app.timers.register(finish, persistent=True)
 """)
     with (tmp_path / "blender.log").open("w+") as log:
         process = subprocess.Popen(
@@ -302,6 +302,46 @@ bpy.context.view_layer.update()
             image = base64.b64decode(screenshot["content"][0]["data"])
             assert image.startswith(b"\x89PNG\r\n\x1a\n")
             (tmp_path / "viewport.png").write_bytes(image)
+            checkpoint = call("create_checkpoint", {"label": "Transport recovery"})
+            failed = client.call(
+                "execute_blender_code",
+                {
+                    "code": "bpy.context.collection.objects.link(bpy.data.objects.new('Recovery.Transport', None))\nraise ValueError('recover over MCP')",
+                    "namespace": "transport-recovery",
+                    "summarize_changes": True,
+                },
+            )
+            assert failed["isError"], failed
+            outcome = failed["structuredContent"]
+            assert outcome["changes"]["created"][0]["name"] == "Recovery.Transport"
+            assert call("get_execution_result", {}) == outcome
+            restored = call(
+                "restore_checkpoint", {"checkpoint_id": checkpoint["checkpoint_id"]}
+            )
+            assert restored["namespaces_cleared"]
+            assert (
+                call("get_scene_info", {"name_filter": "Recovery.Transport"})[
+                    "matching_objects"
+                ]
+                == 0
+            )
+            check = call(
+                "execute_blender_code",
+                {
+                    "code": "print(bpy.context.scene.blendermcp_server_running)\nprint(len(bpy.types.blendermcp_server._execution_namespaces))"
+                },
+            )
+            assert check["result"] == "True\n0\n"
+            call(
+                "restore_checkpoint",
+                {"checkpoint_id": restored["safety_checkpoint"]["checkpoint_id"]},
+            )
+            assert (
+                call("get_scene_info", {"name_filter": "Recovery.Transport"})[
+                    "matching_objects"
+                ]
+                == 1
+            )
             print(
                 f"Native Blender {state['version']}: TLS authentication, Python namespaces/diagnostics, scene pagination, world transforms, and viewport capture passed"
             )

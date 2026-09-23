@@ -186,6 +186,26 @@ def client(binary, tmp_path):
 
 
 CASES = [
+    (
+        "create_checkpoint",
+        {"label": "Before edits"},
+        "create_checkpoint",
+        {"label": "Before edits"},
+    ),
+    ("list_checkpoints", {}, "list_checkpoints", {}),
+    (
+        "restore_checkpoint",
+        {"checkpoint_id": "a" * 32},
+        "restore_checkpoint",
+        {"checkpoint_id": "a" * 32},
+    ),
+    (
+        "delete_checkpoint",
+        {"checkpoint_id": "a" * 32},
+        "delete_checkpoint",
+        {"checkpoint_id": "a" * 32},
+    ),
+    ("get_execution_result", {}, "get_execution_result", {}),
     ("get_addon_status", {}, "get_addon_info", {}),
     ("get_scene_info", {}, "get_scene_info", {}),
     (
@@ -288,6 +308,31 @@ def test_all_tools_over_stdio_and_tcp(client):
     prompt = client.rpc("prompts/get", {"name": "asset_creation_strategy"})["result"]
     assert "record_trajectory_feedback" not in json.dumps(prompt)
     assert "get_viewport_screenshot" in json.dumps(prompt)
+
+
+def test_structured_execution_failure_survives_mcp_transport(client, monkeypatch):
+    outcome = {
+        "executed": False,
+        "error_message": "deliberate",
+        "execution_id": "a" * 32,
+        "checkpoint": {"checkpoint_id": "b" * 32},
+        "changes": {"created": [{"name": "Left behind"}]},
+    }
+    monkeypatch.setattr(
+        client, "respond", lambda command: {"status": "success", "result": outcome}
+    )
+    result = client.call(
+        "execute_blender_code",
+        {
+            "code": "raise ValueError('deliberate')",
+            "checkpoint": True,
+            "summarize_changes": True,
+        },
+    )
+    assert result["isError"]
+    assert result["structuredContent"] == outcome
+    assert json.loads(result["content"][0]["text"]) == outcome
+    assert client.commands[-1]["params"]["checkpoint"] is True
 
 
 def test_tool_annotations_distinguish_inspection_edits_and_network(client):
