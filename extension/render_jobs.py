@@ -182,6 +182,35 @@ class RenderJobs:
                 raise RuntimeError(f"Render job {job.job_id} is still {job.state}")
 
     @staticmethod
+    def _validate_snapshot_images(scene: bpy.types.Scene) -> None:
+        dirty = [
+            image
+            for image in bpy.data.images
+            if image.is_dirty and image.source != "VIEWER"
+        ]
+        if not dirty:
+            return
+        users = bpy.data.user_map()
+        unsaved = []
+        for image in dirty:
+            pending = list(users.get(image, ()))
+            visited = set()
+            while pending:
+                user = pending.pop()
+                if user == scene:
+                    unsaved.append(image.name)
+                    break
+                if user not in visited:
+                    visited.add(user)
+                    pending.extend(users.get(user, ()))
+        if unsaved:
+            names = ", ".join(repr(name) for name in sorted(unsaved))
+            raise ValueError(
+                f"Render snapshot would lose unsaved image pixels: {names}. "
+                "Save or pack these images before rendering"
+            )
+
+    @staticmethod
     def _scene(scene_name: str | None) -> bpy.types.Scene:
         if scene_name is not None and (
             not isinstance(scene_name, str) or not scene_name
@@ -192,10 +221,9 @@ class RenderJobs:
         )
         if scene is None:
             raise ValueError(f"Scene not found: {scene_name}")
-        if scene.camera is None or scene.camera.type != "CAMERA":
-            raise ValueError(f"Scene {scene.name} has no active camera")
         if not bpy.app.binary_path:
             raise RuntimeError("Blender executable path is unavailable")
+        RenderJobs._validate_snapshot_images(scene)
         return scene
 
     @staticmethod

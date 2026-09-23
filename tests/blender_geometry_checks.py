@@ -20,6 +20,8 @@ def run_checks(server):
         bpy.data.collections,
         bpy.data.meshes,
         bpy.data.curves,
+        bpy.data.hair_curves,
+        bpy.data.pointclouds,
         bpy.data.node_groups,
         bpy.data.actions,
     )
@@ -244,6 +246,22 @@ def run_checks(server):
         ), curve_summary
         empty = bpy.data.objects.new("GeometryCheck.Empty", None)
         collection.objects.link(empty)
+        empty.rotation_mode = "QUATERNION"
+        empty.rotation_quaternion = (0.5, 0.5, 0.5, 0.5)
+        assert server.handlers["get_object_info"](empty.name)["rotation"] == [
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+        ]
+        empty.rotation_mode = "AXIS_ANGLE"
+        empty.rotation_axis_angle = (1.0, 0, 0, 1)
+        assert server.handlers["get_object_info"](empty.name)["rotation"] == [
+            1.0,
+            0,
+            0,
+            1,
+        ]
         empty_info = inspect(empty)
         assert empty_info["mesh"] is None, empty_info
         assert empty_info["world_bounding_box"] is empty_info["dimensions"] is None, (
@@ -254,6 +272,9 @@ def run_checks(server):
         )
         collection.objects.link(zero)
         zero_info = inspect(zero)
+        assert (
+            server.handlers["get_object_info"](zero.name)["world_bounding_box"] is None
+        )
         assert zero_info["mesh"] == {"vertices": 0, "edges": 0, "polygons": 0}, (
             zero_info
         )
@@ -272,12 +293,72 @@ def run_checks(server):
             assert inspect(outer) == instanced
             assert inspect(emitter) == mixed
         assert len(bpy.data.meshes) == mesh_count
+
+        hair = bpy.data.hair_curves.new("GeometryCheck.Hair")
+        hair.add_curves([2, 3])
+        for index, point in enumerate(hair.points):
+            point.position = (index, 0, 0)
+            point.radius = 0.25
+        hair_obj = bpy.data.objects.new("GeometryCheck.Hair", hair)
+        collection.objects.link(hair_obj)
+        hair_info = inspect(hair_obj)
+        assert hair_info["mesh"] is None, hair_info
+        assert hair_info["components"] == {"CURVES": {"curves": 2, "points": 5}}, (
+            hair_info
+        )
+        assert hair_info["components_including_instances"] == hair_info["components"], (
+            hair_info
+        )
+        assert hair_info["world_bounding_box"] is not None, hair_info
+        assert hair_info["dimensions"][0] >= 4, hair_info
+        hair_source = bpy.data.collections.new("GeometryCheck.HairSource")
+        hair_source.objects.link(hair_obj)
+        collection.objects.unlink(hair_obj)
+        hair_outer = instance("GeometryCheck.HairOuter", hair_source, collection)
+        hair_instance = inspect(hair_outer)
+        assert (
+            hair_instance["components_including_instances"] == hair_info["components"]
+        ), hair_instance
+        close_bounds(
+            hair_instance["world_bounding_box"], hair_info["world_bounding_box"]
+        )
+
+        cloud_node = group.nodes.new("GeometryNodePoints")
+        cast(bpy.types.NodeSocketInt, cloud_node.inputs["Count"]).default_value = 3
+        cast(
+            bpy.types.NodeSocketVector, cloud_node.inputs["Position"]
+        ).default_value = (2, 3, 4)
+        cast(bpy.types.NodeSocketFloat, cloud_node.inputs["Radius"]).default_value = 0.5
+        group.links.new(cloud_node.outputs["Points"], outputs.inputs["Geometry"])
+        cloud_info = inspect(emitter)
+        assert cloud_info["components_including_instances"]["POINTCLOUD"] == {
+            "points": 3
+        }, cloud_info
+        close_bounds(
+            cloud_info["world_bounding_box"], [[1.5, 2.5, 3.5], [2.5, 3.5, 4.5]]
+        )
+        assert cloud_info["unmeasured_types"] == [], cloud_info
+        join_links = join.inputs["Geometry"].links
+        assert join_links is not None
+        for link in list(join_links):
+            group.links.remove(link)
+        group.links.new(inputs.outputs["Geometry"], join.inputs["Geometry"])
+        group.links.new(cloud_node.outputs["Points"], join.inputs["Geometry"])
+        group.links.new(join.outputs["Geometry"], outputs.inputs["Geometry"])
+        mixed_components = inspect(emitter)
+        assert mixed_components["components_including_instances"] == {
+            "MESH": {"vertices": 2, "edges": 0, "polygons": 0},
+            "POINTCLOUD": {"points": 3},
+        }, mixed_components
+        close_bounds(mixed_components["world_bounding_box"], [[0, 0, 0], [5, 3.5, 4.5]])
         return {
             "array": result,
             "animated": animated,
             "collection": instanced,
             "geometry_nodes": nodes,
             "realized": realized,
+            "hair_curves": hair_info,
+            "point_cloud": cloud_info,
         }
     finally:
         for group, original in zip(data_groups, original_data):

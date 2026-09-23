@@ -76,9 +76,12 @@ class ExecutionSession:
         self._checkpoints: Checkpoints | None = None
 
     def close(self) -> None:
-        self._execution_namespaces.clear()
+        self.clear_namespaces()
         self._execution_results.clear()
         self._execution_changes.clear()
+
+    def clear_namespaces(self) -> None:
+        self._execution_namespaces.clear()
 
     def _checkpoint_store(self) -> Checkpoints:
         if self._checkpoints is None:
@@ -94,9 +97,7 @@ class ExecutionSession:
         return self._checkpoint_store().list()
 
     def restore_checkpoint(self, checkpoint_id: str) -> dict[str, object]:
-        result = self._checkpoint_store().restore(
-            checkpoint_id, self._execution_namespaces.clear
-        )
+        result = self._checkpoint_store().restore(checkpoint_id, self.clear_namespaces)
         current_scene().blendermcp_server_running = self._running()
         return result
 
@@ -141,6 +142,10 @@ class ExecutionSession:
         summarize_changes: bool = False,
     ) -> ExecutionResult:
         """Execute arbitrary Blender Python code"""
+        if not isinstance(code, str):
+            raise TypeError("code must be a string")
+        if type(reset_namespace) is not bool:
+            raise ValueError("reset_namespace must be a boolean")
         if namespace is not None and (
             not isinstance(namespace, str) or not 1 <= len(namespace) <= 128
         ):
@@ -189,7 +194,7 @@ class ExecutionSession:
                 "partial_changes": False,
                 "result": stdout.getvalue(),
             }
-        except Exception as e:
+        except (Exception, SystemExit, KeyboardInterrupt) as e:
             logger.exception("Error executing Blender Python code")
             diagnostic = BoundedOutput()
             diagnostic.write(f"{type(e).__name__}\n")

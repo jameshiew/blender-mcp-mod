@@ -27,7 +27,7 @@ def test_temporary_mesh_is_released_on_success_and_failure(geometry, failure):
         return SimpleNamespace(vertices=[], edges=[], polygons=[])
 
     obj = SimpleNamespace(
-        type="MESH", to_mesh=to_mesh, to_mesh_clear=lambda: cleared.append(True)
+        type="CURVE", to_mesh=to_mesh, to_mesh_clear=lambda: cleared.append(True)
     )
     if failure:
         with pytest.raises((RuntimeError, AttributeError)):
@@ -70,15 +70,17 @@ def test_repeated_instances_share_conversion_and_source_summary(geometry):
 
     source = SimpleNamespace(
         type="MESH",
-        data=SimpleNamespace(as_pointer=lambda: 2),
+        data=mesh,
         to_mesh=to_mesh,
         to_mesh_clear=lambda: None,
+        bound_box=[(-1, -2, -3), (1, 2, 3)],
         original=SimpleNamespace(
             name="Plant",
             as_pointer=lambda: 3,
             library=SimpleNamespace(filepath="/assets/plants.blend"),
         ),
     )
+    mesh.as_pointer = lambda: 2
     graph = SimpleNamespace(
         mode="VIEWPORT",
         object_instances=(
@@ -96,7 +98,7 @@ def test_repeated_instances_share_conversion_and_source_summary(geometry):
     bpy.context.evaluated_depsgraph_get = lambda: graph
     bpy.context.scene.frame_current = 10
     result = module.evaluated_geometry(original)
-    assert len(conversions) == 1
+    assert len(conversions) == 0
     assert result["mesh_including_instances"] == {
         "vertices": 2000,
         "edges": 0,
@@ -133,3 +135,43 @@ def test_geometry_cache_distinguishes_prototypes_and_original_objects(geometry):
     assert module._geometry_key(first) == module._geometry_key(wrapper)
     assert module._geometry_key(first) != module._geometry_key(prototype)
     assert module._geometry_key(first) != module._geometry_key(other)
+
+
+@pytest.mark.parametrize(
+    "kind, counts",
+    [("CURVES", {"curves": 2, "points": 4}), ("POINTCLOUD", {"points": 4})],
+)
+def test_native_geometry_reports_counts_and_degenerate_bounds(geometry, kind, counts):
+    module, _ = geometry
+    obj = SimpleNamespace(
+        type=kind,
+        data=SimpleNamespace(curves=range(2), points=range(4)),
+        bound_box=[(-1, -1, -1)] * 8,
+    )
+    assert module._native_geometry(obj) == (
+        {kind: counts},
+        [[-1, -1, -1], [-1, -1, -1]],
+    )
+    obj.data.points = []
+    assert module._native_geometry(obj)[1] is None
+
+
+def test_evaluated_mesh_bounds_do_not_scan_vertices_in_python(geometry):
+    module, _ = geometry
+
+    class Vertices:
+        def __len__(self):
+            return 1_000_000
+
+        def __iter__(self):
+            raise AssertionError("Use Blender's cached evaluated bounds")
+
+    obj = SimpleNamespace(
+        type="MESH",
+        bound_box=[(-1, -2, -3), (1, 2, 3)],
+        data=SimpleNamespace(vertices=Vertices(), edges=[], polygons=[]),
+    )
+    assert module._mesh_geometry(obj) == (
+        {"vertices": 1_000_000, "edges": 0, "polygons": 0},
+        [[-1, -2, -3], [1, 2, 3]],
+    )

@@ -72,6 +72,7 @@ def renders(addon, monkeypatch):
 
     bpy.data = SimpleNamespace(
         scenes={scene.name: scene},
+        images=[],
         libraries=SimpleNamespace(write=write),
     )
     processes, launches = [], []
@@ -279,11 +280,37 @@ def test_invalid_requests_do_not_write_snapshots(renders, arguments):
     assert not renders.processes
 
 
-def test_missing_camera_and_launch_failure_are_clean(renders, monkeypatch):
+def test_camera_validation_is_left_to_blender_render_pipeline(renders):
     renders.scene.camera = None
-    with pytest.raises(ValueError, match="camera"):
+    result = renders.manager.start()
+    assert result["state"] == "running"
+    assert renders.snapshots[0][1] == {renders.scene}
+
+
+def test_snapshot_rejects_only_reachable_unsaved_image_pixels(renders):
+    used = Scene(name="Painted texture", is_dirty=True, source="FILE")
+    unused = Scene(name="Unrelated image", is_dirty=True, source="GENERATED")
+    viewer = Scene(name="Render Result", is_dirty=True, source="VIEWER")
+    material = Scene(name="Material")
+    bpy = renders.module.bpy
+    bpy.data.images = [used, unused, viewer]
+    bpy.data.user_map = lambda: {
+        used: {material},
+        material: {renders.scene, material},
+        unused: set(),
+        viewer: {renders.scene},
+    }
+    with pytest.raises(ValueError, match="Painted texture.*Save or pack") as error:
         renders.manager.start()
-    renders.scene.camera = SimpleNamespace(type="CAMERA")
+    assert "Unrelated image" not in str(error.value)
+    assert "Render Result" not in str(error.value)
+    assert not renders.snapshots
+    assert used.is_dirty
+    used.is_dirty = False
+    assert renders.manager.start()["state"] == "running"
+
+
+def test_launch_failure_is_clean(renders, monkeypatch):
 
     def fail(*args, **kwargs):
         raise OSError("Cannot launch Blender")

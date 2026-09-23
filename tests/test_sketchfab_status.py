@@ -219,10 +219,11 @@ def test_failed_import_removes_temporary_files(addon, monkeypatch, tmp_path):
     service, module, bpy = sketchfab_service(addon)
     local_download(monkeypatch, module, tmp_path, archive_bytes({"scene.gltf": "{}"}))
 
-    def fail_import(filepath):
+    def fail_import(filepath, **options):
         assert Path(filepath).is_file()
         raise RuntimeError("import failed")
 
+    bpy.data.objects = []
     bpy.ops.import_scene.gltf = fail_import
     assert service.download_sketchfab_model("model") == {
         "error": "Failed to download model: import failed"
@@ -236,14 +237,32 @@ def test_download_normalizes_only_roots_and_recalculates_combined_bounds(
     service, module, bpy = sketchfab_service(addon)
     local_download(monkeypatch, module, tmp_path, archive_bytes({"scene.gltf": "{}"}))
     root = types.SimpleNamespace(
-        name="Root", type="EMPTY", parent=None, scale=(1, 1, 1), children=[]
+        name="Root",
+        type="EMPTY",
+        parent=None,
+        scale=(1, 1, 1),
+        location=(0, 0, 0),
+        children=[],
+        session_uid=1,
     )
     mesh = types.SimpleNamespace(
-        name="Mesh", type="MESH", parent=root, scale=(1, 1, 1), children=[]
+        name="Mesh",
+        type="MESH",
+        parent=root,
+        scale=(1, 1, 1),
+        children=[],
+        session_uid=2,
     )
     root.children.append(mesh)
     bpy.context.selected_objects = [root, mesh]
-    bpy.ops.import_scene.gltf = lambda **_kwargs: None
+    bpy.data.objects = []
+
+    def import_model(**kwargs):
+        assert kwargs["import_pack_images"]
+        bpy.data.objects.extend([root, mesh])
+        return {"FINISHED"}
+
+    bpy.ops.import_scene.gltf = import_model
     updates = []
     bpy.context.view_layer = types.SimpleNamespace(update=lambda: updates.append(True))
     monkeypatch.setattr(
@@ -265,5 +284,73 @@ def test_download_normalizes_only_roots_and_recalculates_combined_bounds(
     }
     assert root.scale == (0.25, 0.25, 0.25)
     assert mesh.scale == (1, 1, 1)
-    assert updates == [True]
+    assert updates == [True, True]
     assert list(tmp_path.iterdir()) == []
+
+
+def test_cancelled_import_does_not_report_or_normalize_existing_selection(addon):
+    module, bpy = addon.sketchfab, addon.sketchfab.bpy
+    existing = types.SimpleNamespace(session_uid=7, scale=(1, 1, 1))
+    bpy.data.objects = [existing]
+    bpy.context.selected_objects = [existing]
+    bpy.ops.import_scene.gltf = lambda **kwargs: {"CANCELLED"}
+    with pytest.raises(module.SketchfabError, match="cancelled"):
+        module._import_archive(archive_bytes({"scene.gltf": "{}"}), True, 1)
+    assert existing.scale == (1, 1, 1)
+
+
+def test_import_bounds_ignore_empty_meshes(addon, monkeypatch):
+    module = addon.sketchfab
+    bounds = [[-1, -2, -3], [1, 2, 3]]
+    monkeypatch.setattr(module, "world_bounding_box", lambda obj: obj)
+    assert module._mesh_bounds([None, bounds, None]) == bounds
+    assert module._mesh_bounds([None]) is None
+
+
+@pytest.mark.parametrize("size", [0, -1, float("nan"), float("inf"), True, "large"])
+def test_invalid_normalization_size_is_rejected_before_import(addon, size):
+    with pytest.raises(addon.sketchfab.SketchfabError, match="positive finite"):
+        addon.sketchfab._import_archive(b"", True, size)
+
+
+def test_nested_archive_and_multiple_root_offsets_are_normalized(addon, monkeypatch):
+    module, bpy = addon.sketchfab, addon.sketchfab.bpy
+    bpy.data.objects = [types.SimpleNamespace(session_uid=1)]
+    existing = bpy.data.objects[0]
+    roots = [
+        types.SimpleNamespace(
+            name=f"Root{index}",
+            type="MESH",
+            parent=None,
+            scale=(1, 1, 1),
+            location=(x, 0, 0),
+            children=[],
+            session_uid=index + 2,
+        )
+        for index, x in enumerate((-10, 10))
+    ]
+
+    def import_model(filepath, **options):
+        assert Path(filepath).name == "scene.GLTF"
+        bpy.data.objects.extend(roots)
+        bpy.context.selected_objects = [existing]
+        return {"FINISHED"}
+
+    bpy.ops.import_scene.gltf = import_model
+    monkeypatch.setattr(
+        module,
+        "world_bounding_box",
+        lambda obj: [
+            [value - scale for value, scale in zip(obj.location, obj.scale)],
+            [value + scale for value, scale in zip(obj.location, obj.scale)],
+        ],
+    )
+    result = module._import_archive(
+        archive_bytes({"model/scene.GLTF": "{}"}),
+        True,
+        2,
+    )
+    assert result["imported_objects"] == ["Root0", "Root1"]
+    assert result["dimensions"][0] == 2
+    assert roots[0].location[0] == pytest.approx(-10 / 11)
+    assert roots[1].location[0] == pytest.approx(10 / 11)

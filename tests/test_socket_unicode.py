@@ -1,126 +1,137 @@
-"""Regression coverage for split multi-byte UTF-8 sequences in the socket buffer.
-
-The bug: `_handle_client` accumulates `recv()` chunks into `buffer` and does
-`buffer.decode('utf-8')` before attempting `json.loads()`. Only
-`json.JSONDecodeError` was caught, treated as "incomplete data, wait for more".
-If a multi-byte UTF-8 character (e.g. an accented letter, CJK text, or an
-emoji in an object name or in LLM-generated code) is split across a `recv()`
-chunk boundary, `.decode('utf-8')` raises `UnicodeDecodeError` instead -
-uncaught here, so it falls through to the outer `except Exception`, which
-logs and `break`s. The command is dropped and the connection is torn down,
-even though the rest of the payload was already sitting in the OS receive
-buffer waiting to be read.
-
-A real loopback socket won't reliably reproduce an exact byte-offset split
-(the OS may coalesce separate `sendall()` calls into one `recv()`), so this
-drives `_handle_client` directly with a fake socket that returns pre-scripted
-chunks - deterministic, no network, no flakiness.
-"""
-
 from __future__ import annotations
 
 import json
-import queue
+import ssl
 
 import pytest
 
 
-class _ScriptedSocket:
-    """Fake client socket returning pre-scripted recv() chunks, one per call."""
-
-    def __init__(self, chunks):
-        self._chunks = list(chunks)
-        self.sent = []
-
-    def settimeout(self, timeout):
-        pass
+class ScriptedSocket:
+    def __init__(self, chunks, *, write_limit=None):
+        self.chunks = list(chunks)
+        self.sent = bytearray()
+        self.write_limit = write_limit
+        self.closed = False
 
     def do_handshake(self):
         pass
 
-    def recv(self, bufsize):
-        if self._chunks:
-            return self._chunks.pop(0)
-        return b""
+    def recv(self, size):
+        if not self.chunks:
+            raise ssl.SSLWantReadError()
+        value = self.chunks.pop(0)
+        if isinstance(value, BaseException):
+            raise value
+        return value
 
-    def sendall(self, data):
-        self.sent.append(data)
+    def send(self, data):
+        count = len(data) if self.write_limit is None else self.write_limit
+        self.sent.extend(data[:count])
+        return min(count, len(data))
 
     def close(self):
-        pass
+        self.closed = True
 
 
-def _make_server(server_class):
-    server = server_class(port=0)
-    server.execute_command = lambda command: {"status": "success", "result": {}}
-
-    class RespondingQueue(queue.Queue):
-        def put(self, item, block=True, timeout=None):
-            super().put(item, block=block, timeout=timeout)
-            item[1].put(b'{"status":"success","result":{}}')
-
-    server.command_queue = RespondingQueue()
-    return server
+def add_client(addon, server, client):
+    state = addon.transport.ClientState(client, None, handshaking=False)
+    server._clients[client] = state
+    server.running = True
+    return state
 
 
-def _split_after_lead_byte(payload: bytes) -> int:
-    """Index right after a multi-byte UTF-8 lead byte's first byte.
-
-    Splitting there guarantees the first chunk ends mid-character, so
-    decoding it alone as UTF-8 raises UnicodeDecodeError.
-    """
-    for i, b in enumerate(payload):
-        if b >= 0xC0:  # lead byte of a 2/3/4-byte sequence
-            return i + 1
-    raise AssertionError("payload has no multi-byte UTF-8 character to split")
-
-
-def test_split_multibyte_utf8_boundary_is_not_dropped(server_class):
-    payload = json.dumps(
-        {"type": "ping", "params": {"note": "café ☕ 日本語"}}, ensure_ascii=False
-    ).encode("utf-8")
-    split_idx = _split_after_lead_byte(payload)
-    chunk1, chunk2 = payload[:split_idx], payload[split_idx:]
-
-    # Sanity check: confirm the split really does land mid-character, i.e.
-    # this fixture actually exercises the bug and isn't accidentally valid.
+@pytest.mark.parametrize("label", ["café ☕ 日本語", "emoji test 🎨"])
+def test_fragmented_utf8_and_following_request_are_executed_once(addon, label):
+    server = addon.server.BlenderMCPServer()
+    commands = []
+    server.execute_command = lambda command: (
+        commands.append(command) or {"status": "success", "result": {}}
+    )
+    payload = json.dumps({"type": "ping", "note": label}, ensure_ascii=False).encode()
+    split = next(index + 1 for index, value in enumerate(payload) if value >= 0xC0)
     with pytest.raises(UnicodeDecodeError):
-        chunk1.decode("utf-8")
+        payload[:split].decode()
+    client = ScriptedSocket([payload[:split], ssl.SSLWantReadError()])
+    state = add_client(addon, server, client)
+    server._tick()
+    assert not commands
+    assert state.incoming == payload[:split]
+    client.chunks.append(payload[split:])
+    server._tick()
+    assert commands == [{"type": "ping", "note": label}]
+    server._tick()
+    assert json.loads(client.sent)["status"] == "success"
+    client.chunks.append(b'{"type":"ping"}')
+    server._tick()
+    assert commands == [{"type": "ping", "note": label}, {"type": "ping"}]
 
-    server = _make_server(server_class)
-    server.running = True
-    server._handle_client(_ScriptedSocket([chunk1, chunk2]))
 
-    assert not server.command_queue.empty(), (
-        "command was dropped: a multi-byte UTF-8 character split across a "
-        "recv() chunk boundary killed the connection instead of waiting for "
-        "the rest of the buffer"
+def test_partial_writes_never_repeat_execution_or_read_next_command_early(addon):
+    server = addon.server.BlenderMCPServer()
+    commands = []
+    server.execute_command = lambda command: (
+        commands.append(command)
+        or {"status": "success", "result": {"output": "x" * 1000}}
     )
-    command, _client = server.command_queue.get_nowait()
-    assert command["type"] == "ping"
-    assert command["params"]["note"] == "café ☕ 日本語"
+    client = ScriptedSocket([b'{"type":"ping"}'], write_limit=7)
+    state = add_client(addon, server, client)
+    server._tick()
+    client.chunks.append(b'{"type":"next"}')
+    for _ in range(100):
+        assert len(commands) == 1
+        if not state.outgoing:
+            break
+        server._tick()
+    assert not state.outgoing
+    assert json.loads(client.sent)["result"]["output"] == "x" * 1000
+    server._tick()
+    assert commands == [{"type": "ping"}, {"type": "next"}]
 
 
-def test_split_multibyte_utf8_boundary_keeps_handler_loop_alive(server_class):
-    """A second command sent right after the split payload must still arrive.
+def test_incomplete_large_command_is_scanned_once_without_json_reparsing(
+    addon, monkeypatch
+):
+    server = addon.server.BlenderMCPServer()
+    server.execute_command = lambda command: {"status": "success", "result": {}}
+    client = ScriptedSocket([b'{"text":"' + b"x" * 65536])
+    state = add_client(addon, server, client)
+    original = addon.transport.json.loads
+    parsed = []
 
-    If the split killed the loop, this second command would never be queued.
-    """
-    first = json.dumps(
-        {"type": "ping", "params": {"note": "emoji test 🎨"}}, ensure_ascii=False
-    ).encode("utf-8")
-    split_idx = _split_after_lead_byte(first)
-    second = json.dumps({"type": "ping", "params": {}}).encode("utf-8")
+    def loads(data):
+        parsed.append(len(data))
+        return original(data)
 
-    server = _make_server(server_class)
-    server.running = True
-    server._handle_client(
-        _ScriptedSocket([first[:split_idx], first[split_idx:], second])
+    monkeypatch.setattr(addon.transport.json, "loads", loads)
+    for _ in range(10):
+        server._tick()
+    assert not parsed
+    client.chunks.append(b'\\"[}]\\\\"}')
+    server._tick()
+    assert len(parsed) == 1
+    assert state.outgoing and not client.closed
+
+
+@pytest.mark.parametrize("payload", [b'{"x":' + b"[" * 128, b'{"x":]', b"[]", b"{}{}"])
+def test_invalid_framing_and_excessive_json_depth_are_rejected(addon, payload):
+    server = addon.server.BlenderMCPServer()
+    client = ScriptedSocket([payload])
+    add_client(addon, server, client)
+    server._tick()
+    assert client.closed
+
+
+def test_oversized_response_returns_bounded_error_without_replaying(addon):
+    server = addon.server.BlenderMCPServer()
+    server.max_message_bytes = 256
+    calls = []
+    server.execute_command = lambda command: (
+        calls.append(command) or {"data": "x" * 1000}
     )
-
-    queued = []
-    while not server.command_queue.empty():
-        command, _client = server.command_queue.get_nowait()
-        queued.append(command)
-
-    assert len(queued) == 2, f"expected both commands queued, got {queued}"
+    client = ScriptedSocket([b'{"type":"ping"}'])
+    state = add_client(addon, server, client)
+    server._tick()
+    assert len(state.outgoing) < server.max_message_bytes
+    assert json.loads(state.outgoing)["status"] == "error"
+    server._tick()
+    assert len(calls) == 1

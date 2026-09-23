@@ -193,6 +193,18 @@ def client(binary, tmp_path, server_class):
 
 CASES = [
     (
+        "get_blender_api_info",
+        {"identifier": "Camera", "query": "lens"},
+        "get_blender_api_info",
+        {
+            "identifier": "Camera",
+            "query": "lens",
+            "kind": "TYPE",
+            "offset": 0,
+            "limit": 50,
+        },
+    ),
+    (
         "get_material_info",
         {"material_name": "Glass", "offset": 2, "limit": 5},
         "get_material_info",
@@ -380,6 +392,24 @@ def test_all_tools_over_stdio_and_tcp(client):
     assert "get_viewport_screenshot" in json.dumps(prompt)
 
 
+@pytest.mark.parametrize("protocol", [None, PROTOCOL_VERSION - 1, PROTOCOL_VERSION + 1])
+def test_addon_status_requires_exact_protocol(client, monkeypatch, protocol):
+    monkeypatch.setattr(
+        client,
+        "respond",
+        lambda command: {
+            "status": "success",
+            "result": {
+                "addon_build_version": RELEASE_VERSION,
+                "protocol_version": protocol,
+            },
+        },
+    )
+    assert (
+        client.call("get_addon_status", {})["structuredContent"]["up_to_date"] is False
+    )
+
+
 def test_structured_execution_failure_survives_mcp_transport(client, monkeypatch):
     outcome = {
         "started": True,
@@ -440,6 +470,7 @@ def test_tool_annotations_distinguish_inspection_edits_and_network(client):
     }
     for name in (
         "get_addon_status",
+        "get_blender_api_info",
         "get_material_info",
         "get_node_group_info",
         "get_modifier_info",

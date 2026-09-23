@@ -3,13 +3,11 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
-from addon_stub import _load_addon
 from test_scene_info import Vector
 
 
 @pytest.fixture
-def view(monkeypatch):
-    addon = _load_addon(monkeypatch)
+def view(addon, monkeypatch):
     bpy = addon.server.bpy
     module = addon.view
     monkeypatch.setattr(module, "Vector", Vector)
@@ -23,9 +21,17 @@ def view(monkeypatch):
         {"lens": True},
         {"lens": float("nan")},
         {"ortho_scale": 0},
-        {"projection": "PANO"},
+        {"projection": "UNKNOWN"},
         {"projection": []},
         {"make_active": 1},
+        {"sensor_fit": "VERTICALS"},
+        {"sensor_width": 0.5},
+        {"sensor_height": float("inf")},
+        {"use_dof": 1},
+        {"focus_object": []},
+        {"focus_distance": -1},
+        {"aperture_fstop": float("nan")},
+        {"panorama_type": "UNKNOWN"},
     ],
 )
 def test_camera_validates_before_context_access(view, options):

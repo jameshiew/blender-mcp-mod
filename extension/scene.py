@@ -119,16 +119,19 @@ def get_object_info(
     if not obj:
         raise ValueError(f"Object not found: {name}")
 
+    rotation = (
+        obj.rotation_quaternion
+        if obj.rotation_mode == "QUATERNION"
+        else obj.rotation_axis_angle
+        if obj.rotation_mode == "AXIS_ANGLE"
+        else obj.rotation_euler
+    )
     materials: list[str] = []
     obj_info: dict[str, object] = {
         "name": obj.name,
         "type": obj.type,
         "location": [obj.location.x, obj.location.y, obj.location.z],
-        "rotation": [
-            obj.rotation_euler.x,
-            obj.rotation_euler.y,
-            obj.rotation_euler.z,
-        ],
+        "rotation": list(rotation),
         "scale": [obj.scale.x, obj.scale.y, obj.scale.z],
         "dimensions": [float(value) for value in obj.dimensions],
         "rotation_mode": obj.rotation_mode,

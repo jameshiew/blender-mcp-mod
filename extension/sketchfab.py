@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import logging
+import math
 import tempfile
 import zipfile
 from collections.abc import Callable, Sequence
@@ -54,6 +55,8 @@ def _mesh_bounds(meshes: Sequence[bpy.types.Object]) -> Bounds | None:
     bounds = None
     for mesh in meshes:
         mesh_bounds = world_bounding_box(mesh)
+        if mesh_bounds is None:
+            continue
         if bounds is None:
             bounds = mesh_bounds
         else:
@@ -66,6 +69,17 @@ def _mesh_bounds(meshes: Sequence[bpy.types.Object]) -> Bounds | None:
 def _import_archive(
     content: bytes, normalize_size: bool, target_size: float
 ) -> dict[str, object]:
+    if bpy.context.mode != "OBJECT":
+        raise SketchfabError("Model import requires Object mode")
+    if type(normalize_size) is not bool:
+        raise SketchfabError("normalize_size must be a boolean")
+    if (
+        isinstance(target_size, bool)
+        or not isinstance(target_size, (int, float))
+        or not math.isfinite(target_size)
+        or target_size <= 0
+    ):
+        raise SketchfabError("target_size must be a positive finite number")
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
         directory = Path(temporary)
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
@@ -81,13 +95,22 @@ def _import_archive(
                     )
             archive.extractall(directory)
         main_file = next(
-            (path for path in directory.iterdir() if path.suffix in {".gltf", ".glb"}),
+            (
+                path
+                for path in sorted(directory.rglob("*"))
+                if path.suffix.lower() in {".gltf", ".glb"} and path.is_file()
+            ),
             None,
         )
         if main_file is None:
             raise SketchfabError("No glTF file found in the downloaded model")
-        bpy.ops.import_scene.gltf(filepath=str(main_file))
-        imported = list(bpy.context.selected_objects or ())
+        existing = {obj.session_uid for obj in bpy.data.objects}
+        status = bpy.ops.import_scene.gltf(
+            filepath=str(main_file), import_pack_images=True
+        )
+        if status != {"FINISHED"}:
+            raise SketchfabError("Blender cancelled the glTF import")
+        imported = [obj for obj in bpy.data.objects if obj.session_uid not in existing]
 
     roots = [obj for obj in imported if obj.parent is None]
     meshes = []
@@ -98,13 +121,21 @@ def _import_archive(
             meshes.append(obj)
         pending.extend(obj.children)
 
+    current_view_layer().update()
     bounds = _mesh_bounds(meshes)
     scale_applied = 1.0
     if bounds is not None and normalize_size:
         max_dimension = max(high - low for low, high in zip(*bounds))
         if max_dimension > 0:
             scale_applied = target_size / max_dimension
+            center = [(low + high) / 2 for low, high in zip(*bounds)]
             for root in roots:
+                root.location = Vector(
+                    tuple(
+                        origin + (component - origin) * scale_applied
+                        for component, origin in zip(root.location[:], center)
+                    )
+                )
                 root.scale = Vector(
                     tuple(component * scale_applied for component in root.scale)
                 )

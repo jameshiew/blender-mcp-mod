@@ -136,6 +136,26 @@ def run_checks(server, viewport=False):
         inspected = server.handlers["get_object_info"](camera.name)["camera"]
         assert inspected["sensor_fit"] == "AUTO" and inspected["is_active"]
         assert inspected["lens"] == 65 and inspected["dof"]["focus_object"] is None
+        configured = server.handlers["set_camera"](
+            object_name=camera.name,
+            sensor_fit="VERTICAL",
+            sensor_width=48,
+            sensor_height=32,
+            use_dof=True,
+            focus_object=instancer.name,
+            focus_distance=8.5,
+            aperture_fstop=2.8,
+            object_names=targets,
+        )["camera"]
+        assert configured["sensor_fit"] == "VERTICAL", configured
+        assert configured["sensor_width"] == 48 and configured["sensor_height"] == 32
+        assert configured["dof"]["use_dof"] is True, configured
+        assert configured["dof"]["focus_object"] == instancer.name, configured
+        assert configured["dof"]["focus_distance"] == 8.5, configured
+        assert abs(configured["dof"]["aperture_fstop"] - 2.8) < 0.0001, configured
+        for point in corners(instancer):
+            projected = world_to_camera_view(scene, camera, point)
+            assert 0 <= projected.x <= 1 and 0 <= projected.y <= 1, projected[:]
         before = server.handlers["get_object_info"](camera.name)
         for options in (
             {"lens": True},
@@ -145,9 +165,25 @@ def run_checks(server, viewport=False):
             {"object_names": ["Missing"]},
             {"object_names": [camera.name]},
             {"object_names": []},
+            {"sensor_width": 0, "use_dof": False},
+            {"focus_object": "Missing", "sensor_fit": "HORIZONTAL"},
+            {"focus_object": camera.name},
+            {"panorama_type": "EQUIRECTANGULAR", "lens": 30},
+            {"projection": "PANO", "object_names": targets},
         ):
             failure(server.handlers["set_camera"], object_name=camera.name, **options)
             assert server.handlers["get_object_info"](camera.name) == before
+        panoramic = server.handlers["set_camera"](
+            object_name=camera.name,
+            projection="PANO",
+            panorama_type="EQUIRECTANGULAR",
+            focus_object="",
+        )["camera"]
+        assert panoramic["projection"] == "PANO", panoramic
+        assert panoramic["panorama_type"] == "EQUIRECTANGULAR", panoramic
+        assert panoramic["dof"]["focus_object"] is None, panoramic
+        assert panoramic["dof"]["focus_distance"] == 8.5, panoramic
+        server.handlers["set_camera"](object_name=camera.name, projection="PERSP")
         constraint = camera.constraints.new("COPY_LOCATION")
         failure(
             server.handlers["set_camera"],

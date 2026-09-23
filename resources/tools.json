@@ -11,6 +11,23 @@
     }
   },
   {
+    "name": "get_blender_api_info",
+    "description": "Inspect the installed Blender RNA API before writing Python: type properties/functions or operator parameters, defaults, ranges, array shapes, pointer types, readonly/animation flags, and operator poll in the current timer context. Use kind=TYPE with identifier such as Camera, NodesModifier, or Scene; kind=OPERATOR with mesh.primitive_cube_add. query filters member identifiers case-insensitively. Follow next_offset for more members. Enum choices are static only: dynamic choices can depend on context and are not evaluated. Nested enums cap at 100, function parameters and array defaults at 64, text at 2048; details_omitted reports truncation. This inspects RNA metadata, not instance values or Python-only methods. No operator is executed.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "identifier": {"type": "string", "minLength": 1, "description": "Exact bpy.types name or operator namespace.name, without the bpy prefix."},
+        "kind": {"type": "string", "enum": ["TYPE", "OPERATOR"], "default": "TYPE"},
+        "query": {"type": "string", "description": "Case-insensitive substring of property or function identifier."},
+        "offset": {"type": "integer", "minimum": 0, "default": 0},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}
+      },
+      "required": ["identifier"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "get_scene_info",
     "description": "Inspect the active scene, mode, selection, camera, units, and a page of objects sorted by name. Defaults to 20 objects; use next_offset with the same filters to continue until null. Filters combine with AND. Pages reflect live scene state: restart at offset 0 after adding, removing, or renaming objects. Use get_object_info for full transforms, bounds, and modifiers. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
@@ -48,7 +65,7 @@
   },
   {
     "name": "get_object_info",
-    "description": "Inspect an object by exact name: local transforms, world matrix and location, dimensions, parent, collections, modifiers, visibility, materials, and mesh counts/bounds. Local location and Euler rotation (radians) are relative to the parent; use matrix_world for the full world transform. Top-level mesh counts describe the base mesh; bounds and dimensions use cached object bounds. With evaluated=true, adds evaluated data for the current frame and viewport dependency graph: mesh counts after modifiers, instance sources with per-copy mesh counts, mesh_including_instances totals, and world bounds/dimensions including generated instances. Evaluated bounds enclose transformed local mesh bounds. Meshes, curves, surfaces, text, and metaballs contribute mesh geometry; other types have null mesh, and bounds/dimensions are null when there are no vertices. Requires the object in the active view layer dependency graph. May be expensive for dense geometry. Camera objects also include projection, lens in millimetres, field-of-view angles in radians, sensor size/fit, shift, clipping, active-camera state, and depth-of-field settings. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
+    "description": "Inspect an object by exact name: local transforms, world matrix and location, dimensions, parent, collections, modifiers, visibility, materials, and mesh counts/bounds. Local location and rotation are relative to the parent. rotation follows rotation_mode: Euler radians, QUATERNION [w,x,y,z], or AXIS_ANGLE [angle,x,y,z]; use matrix_world for the full world transform. Top-level mesh counts describe the base mesh; bounds and dimensions use cached object bounds. With evaluated=true, adds evaluated data for the current frame and viewport dependency graph: mesh counts after modifiers, instance sources with per-copy mesh counts, mesh_including_instances totals, and world bounds/dimensions including generated instances. Evaluated bounds enclose transformed local mesh bounds. Meshes, legacy curves, surfaces, text, and metaballs contribute mesh geometry. Native hair curves and point clouds include component counts and bounds; volume and Grease Pencil bounds are reported with unmeasured_types for missing counts. Non-mesh components remain separate from mesh totals. Bounds/dimensions are null when unavailable. Requires the object in the active view layer dependency graph. May be expensive for dense geometry. Camera objects also include projection, lens in millimetres, field-of-view angles in radians, sensor size/fit, shift, clipping, active-camera state, and depth-of-field settings. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -122,7 +139,7 @@
       "type": "object",
       "properties": {
         "data_name": {"type": "string", "minLength": 1, "description": "Exact object, material, world, scene, or node-group name. OBJECT_DATA and SHAPE_KEYS use the owning object's name; MATERIAL_NODES and WORLD_NODES use the material/world name."},
-        "data_type": {"type": "string", "enum": ["OBJECT", "OBJECT_DATA", "SHAPE_KEYS", "MATERIAL", "MATERIAL_NODES", "WORLD", "WORLD_NODES", "SCENE", "NODE_GROUP"], "description": "Animation owner (default OBJECT)."},
+        "data_type": {"type": "string", "enum": ["OBJECT", "OBJECT_DATA", "SHAPE_KEYS", "MATERIAL", "MATERIAL_NODES", "WORLD", "WORLD_NODES", "SCENE", "COMPOSITOR_NODES", "NODE_GROUP"], "description": "Animation owner (default OBJECT). COMPOSITOR_NODES uses the scene name."},
         "offset": {"type": "integer", "minimum": 0},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100}
       },
@@ -131,7 +148,7 @@
   },
   {
     "name": "set_camera",
-    "description": "Change camera projection, lens (millimetres), orthographic scale, shift, or clipping, and optionally make it the active scene camera. With object_names, fit evaluated object bounds while preserving camera orientation; padding adds a margin and fitting overrides ortho_scale. Clipping planes are not adjusted automatically. Supports perspective and orthographic fitting; mute camera constraints before fitting. Changes shared camera data. Returns camera settings and world transform. Inspect exact camera and target names first.",
+    "description": "Change camera projection, lens and sensor size (millimetres), sensor fit, depth of field, panoramic mapping, orthographic scale, shift, or clipping, and optionally make it the active scene camera. PANO supports Cycles panoramic cameras; use PERSP or ORTHO for object fitting. With object_names, fit evaluated object bounds while preserving camera orientation; padding adds a margin and fitting overrides ortho_scale. Clipping planes are not adjusted automatically. Supports perspective and orthographic fitting; mute camera constraints before fitting. Changes shared camera data. Returns camera settings and world transform. Inspect exact camera and target names first.",
     "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -146,7 +163,8 @@
           "description": "Camera projection.",
           "enum": [
             "PERSP",
-            "ORTHO"
+            "ORTHO",
+            "PANO"
           ]
         },
         "lens": {
@@ -155,6 +173,14 @@
           "minimum": 1,
           "maximum": 5000
         },
+        "sensor_fit": {"type": "string", "enum": ["AUTO", "HORIZONTAL", "VERTICAL"]},
+        "sensor_width": {"type": "number", "minimum": 1, "maximum": 3.4028234663852886e38, "description": "Sensor width in millimetres."},
+        "sensor_height": {"type": "number", "minimum": 1, "maximum": 3.4028234663852886e38, "description": "Sensor height in millimetres."},
+        "use_dof": {"type": "boolean", "description": "Enable camera depth of field."},
+        "focus_distance": {"type": "number", "minimum": 0, "maximum": 3.4028234663852886e38, "description": "Depth of field focus distance in scene units; used when no focus object is set."},
+        "focus_object": {"type": "string", "description": "Exact scene object name to focus on, or an empty string to clear the focus object."},
+        "aperture_fstop": {"type": "number", "minimum": 0, "maximum": 3.4028234663852886e38, "description": "Depth of field aperture f-number."},
+        "panorama_type": {"type": "string", "enum": ["EQUIRECTANGULAR", "EQUIANGULAR_CUBEMAP_FACE", "MIRRORBALL", "FISHEYE_EQUIDISTANT", "FISHEYE_EQUISOLID", "FISHEYE_LENS_POLYNOMIAL", "CENTRAL_CYLINDRICAL"], "description": "Panorama mapping; requires PANO projection."},
         "ortho_scale": {
           "type": "number",
           "description": "Orthographic camera scale in scene units; smaller values zoom in.",
@@ -337,7 +363,7 @@
   },
   {
     "name": "execute_blender_code",
-    "description": "Execute Python on Blender's main thread with bpy already available. Prefer bpy.data for edits; bpy.ops can require mode, selection, or context overrides. Print concise results; stdout/stderr are limited to 16,384 characters each. Results include started and succeeded. partial_changes is true when a failed script changed inspected objects, false when code did not start or succeeded, and null when a failed script may have effects outside inspection. Errors include traceback and output; changes are not rolled back. Optional checkpoint saves a .blend copy before execution. summarize_changes returns the first 100 changes per category; use get_execution_changes for remaining pages. Either option adds an execution_id retrievable with get_execution_result, including preparation failures. A timeout does not cancel execution: inspect before retrying. Without namespace, globals are fresh each call. A task-specific namespace preserves globals until reset, checkpoint restoration, or server restart. Namespaces separate globals only; Blender data and imported modules are shared.",
+    "description": "Execute Python on Blender's main thread with bpy already available. Prefer bpy.data for edits; bpy.ops can require mode, selection, or context overrides. Print concise results; stdout/stderr are limited to 16,384 characters each. Results include started and succeeded. partial_changes is true when a failed script changed inspected objects, false when code did not start or succeeded, and null when a failed script may have effects outside inspection. Errors include traceback and output; changes are not rolled back. Optional checkpoint saves a .blend copy before execution. summarize_changes returns the first 100 changes per category; use get_execution_changes for remaining pages. Either option adds an execution_id retrievable with get_execution_result, including preparation failures. A timeout does not cancel execution: inspect before retrying. Without namespace, globals are fresh each call. A task-specific namespace preserves globals until reset, file loading, undo/redo, checkpoint restoration, or server restart. Namespaces separate globals only; Blender data and imported modules are shared.",
     "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": true},
     "inputSchema": {
       "type": "object",
@@ -426,7 +452,7 @@
   },
   {
     "name": "start_render",
-    "description": "Render one still frame from a snapshot in a separate Blender process. Returns a job_id immediately after the snapshot is written; poll get_render_status, then use get_render_image to preview or export_render to save the full-resolution PNG. Uses the scene's active camera and render settings without changing the open scene. Optional resolution_percentage applies only to this job. Only one job can run at a time. External assets and caches must be saved on disk; Python auto-execution and compositor file-output nodes are disabled in the worker. The latest eight jobs are retained until the add-on server stops. A client timeout does not cancel a job; call get_render_status without job_id to find the latest job before retrying.",
+    "description": "Render one still frame from a snapshot in a separate Blender process. Returns a job_id immediately after the snapshot is written; poll get_render_status, then use get_render_image to preview or export_render to save the full-resolution PNG. Uses the scene's render settings without changing the open scene, including camera-free compositor or video-sequencer output. Optional resolution_percentage applies only to this job. Only one job can run at a time. Referenced images with unsaved pixel edits must be saved or packed first. External assets and caches must be saved on disk; Python auto-execution and compositor file-output nodes are disabled in the worker. The latest eight jobs are retained until the add-on server stops. A client timeout does not cancel a job; call get_render_status without job_id to find the latest job before retrying.",
     "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -441,7 +467,7 @@
   },
   {
     "name": "start_animation_render",
-    "description": "Render a PNG animation sequence from an immutable scene snapshot in a separate Blender process. output_directory must be a new absolute directory whose parent exists. Defaults to the scene's start, end, and step; the end is inclusive and the range may contain at most 10000 frames. Returns job_id and output_directory after saving the snapshot. Poll get_render_status, preview or export completed frames with get_render_image or export_render, and use cancel_render to stop. Frames are published atomically under frames/frame_0000001.png. The snapshot, frame checksums, and outputs survive cancellation, server restart, and job eviction; use resume_animation_render with the same directory to continue. Only one still or animation job can run per server. Uses saved camera cuts and render settings without changing the open scene. External assets and caches must remain on disk; auto-execution and compositor file-output nodes are disabled. Produces a PNG sequence, not an encoded video or audio track. A client timeout does not cancel the job; inspect get_render_status before retrying.",
+    "description": "Render a PNG animation sequence from an immutable scene snapshot in a separate Blender process. output_directory must be a new absolute directory whose parent exists. Defaults to the scene's start, end, and step; the end is inclusive and the range may contain at most 10000 frames. Returns job_id and output_directory after saving the snapshot. Poll get_render_status, preview or export completed frames with get_render_image or export_render, and use cancel_render to stop. Frames are published atomically under frames/frame_0000001.png. The snapshot, frame checksums, and outputs survive cancellation, server restart, and job eviction; use resume_animation_render with the same directory to continue. Only one still or animation job can run per server. Uses saved camera cuts and render settings without changing the open scene. Referenced images with unsaved pixel edits must be saved or packed first. External assets and caches must remain unchanged on disk for reproducible frames; auto-execution and compositor file-output nodes are disabled. Produces a PNG sequence, not an encoded video or audio track. A client timeout does not cancel the job; inspect get_render_status before retrying.",
     "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -498,7 +524,7 @@
   },
   {
     "name": "get_render_image",
-    "description": "Return a saved camera render as a PNG image with job metadata, returned dimensions, and source dimensions. Stills require a completed job. For animation jobs, choose a completed frame or omit frame for the highest completed frame; previews also work while running or after cancellation or failure. Verifies the animation frame checksum before reading. Scales down to max_size without changing the saved original. Expired job handles require resume_animation_render before access.",
+    "description": "Return a saved render as a PNG image with job metadata, returned dimensions, and source dimensions. Stills require a completed job. For animation jobs, choose a completed frame or omit frame for the highest completed frame; previews also work while running or after cancellation or failure. Verifies the animation frame checksum before reading. Scales down to max_size without changing the saved original. Expired job handles require resume_animation_render before access.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",

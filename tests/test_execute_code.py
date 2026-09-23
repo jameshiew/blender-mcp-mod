@@ -245,3 +245,28 @@ def test_reset_requires_a_namespace(server_class):
         "status": "error",
         "message": "Code execution error: reset_namespace requires a namespace",
     }
+
+
+@pytest.mark.parametrize("exception", ["SystemExit(7)", "KeyboardInterrupt()"])
+def test_process_control_exceptions_do_not_escape_execution(server_class, exception):
+    server = server_class()
+    result = execute(server, f"print('before interrupt')\nraise {exception}")
+    assert result["status"] == "success"
+    assert not result["result"]["succeeded"]
+    assert result["result"]["started"]
+    assert result["result"]["result"] == "before interrupt\n"
+    assert exception.split("(")[0] in result["result"]["error_message"]
+    assert execute(server, "print('still running')")["result"]["succeeded"]
+
+
+@pytest.mark.parametrize("code", [None, 42, b"pass"])
+def test_non_string_code_is_rejected(server_class, code):
+    with pytest.raises(TypeError, match="code must be a string"):
+        server_class().execution.execute_code(code, summarize_changes=True)
+
+
+def test_namespace_reset_flag_must_be_boolean(server_class):
+    with pytest.raises(ValueError, match="reset_namespace must be a boolean"):
+        server_class().execution.execute_code(
+            "pass", namespace="task", reset_namespace=1
+        )

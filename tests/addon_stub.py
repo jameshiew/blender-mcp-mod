@@ -52,6 +52,10 @@ def _install_bpy_stubs(monkeypatch, scene=None, selected_objects=()):
 
     handlers = StubModule("bpy.app.handlers")
     handlers.persistent = lambda fn: fn
+    handlers.load_pre = []
+    handlers.undo_pre = []
+    handlers.redo_pre = []
+    handlers.exit_pre = []
     handlers.undo_post = []
     handlers.redo_post = []
     handlers.depsgraph_update_post = []

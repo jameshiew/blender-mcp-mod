@@ -184,3 +184,115 @@ checks['run_checks'](module.render_jobs.RenderJobs(), Path({str(tmp_path / "film
     )
     assert checked.returncode == 0, checked.stdout + checked.stderr
     assert "ANIMATION_CHECKS_OK" in checked.stdout
+
+
+@pytest.mark.skipif(
+    not os.environ.get("BLENDER_TEST_EXECUTABLE"),
+    reason="Set BLENDER_TEST_EXECUTABLE for native render eligibility checks",
+)
+@pytest.mark.parametrize(
+    "mode", ["COMPOSITOR", "SEQUENCER", "MISSING_CAMERA", "DIRTY_IMAGE"]
+)
+def test_render_uses_native_camera_requirements(unpacked_addon, tmp_path, mode):
+    script = tmp_path / "check_render_eligibility.py"
+    script.write_text(f"""import importlib.util
+import sys
+import time
+from pathlib import Path
+import bpy
+
+directory = Path({str(unpacked_addon)!r})
+sys.path.extend(str(wheel) for wheel in (directory / 'wheels').glob('*.whl'))
+spec = importlib.util.spec_from_file_location('render_eligibility', directory / '__init__.py')
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+mode = {mode!r}
+scene = bpy.context.scene
+scene.render.engine = 'BLENDER_WORKBENCH'
+scene.render.resolution_x = 64
+scene.render.resolution_y = 48
+scene.render.resolution_percentage = 100
+scene.camera = None
+for obj in list(scene.objects):
+    if obj.type == 'CAMERA':
+        bpy.data.objects.remove(obj, do_unlink=True)
+if mode in {{'COMPOSITOR', 'DIRTY_IMAGE'}}:
+    tree = bpy.data.node_groups.new('Camera-less compositor', 'CompositorNodeTree')
+    scene.compositing_node_group = tree
+    tree.interface.new_socket(name='Image', in_out='OUTPUT', socket_type='NodeSocketColor')
+    output = tree.nodes.new('NodeGroupOutput')
+    if mode == 'DIRTY_IMAGE':
+        image = bpy.data.images.new('Unsaved compositor pixels', width=64, height=48)
+        image.pixels.foreach_set([0.2, 0.4, 0.8, 1] * (64 * 48))
+        unrelated = bpy.data.images.new('Unrelated dirty pixels', width=1, height=1)
+        unrelated.pixels[:] = [1, 0, 0, 1]
+        node = tree.nodes.new('CompositorNodeImage')
+        node.image = image
+        tree.links.new(node.outputs['Image'], output.inputs[0])
+    else:
+        color = tree.nodes.new('CompositorNodeRGB')
+        color.outputs[0].default_value = (0.2, 0.4, 0.8, 1)
+        tree.links.new(color.outputs[0], output.inputs[0])
+elif mode == 'SEQUENCER':
+    editor = scene.sequence_editor_create()
+    strip = editor.strips.new_effect('Color', type='COLOR', channel=1, frame_start=1, length=9)
+    strip.color = (0.2, 0.4, 0.8)
+    scene.render.use_sequencer = True
+manager = module.render_jobs.RenderJobs()
+try:
+    if mode == 'DIRTY_IMAGE':
+        try:
+            manager.start(frame=1)
+        except ValueError as error:
+            assert image.name in str(error) and 'Save or pack' in str(error), error
+            assert unrelated.name not in str(error), error
+        else:
+            raise AssertionError('Unsaved compositor pixels must fail before snapshotting')
+        assert image.is_dirty and unrelated.is_dirty
+        assert manager._temporary is None
+        image.pack()
+        assert not image.is_dirty and unrelated.is_dirty
+    result = manager.start(frame=1)
+    deadline = time.monotonic() + 45
+    while result['state'] in {{'running', 'cancelling'}} and time.monotonic() < deadline:
+        time.sleep(0.05)
+        result = manager.status(result['job_id'])
+    if mode == 'MISSING_CAMERA':
+        assert result['state'] == 'failed', result
+        assert 'camera' in result['error_message'].lower(), result
+        assert not result['image_available'], result
+    else:
+        assert result['state'] == 'completed', result
+        assert (result['width'], result['height']) == (64, 48), result
+        assert manager.image(result['job_id'])['image_data']
+        if mode == 'DIRTY_IMAGE':
+            rendered = bpy.data.images.load(str(manager._jobs[result['job_id']].directory / 'render.png'))
+            assert rendered.pixels[2] > rendered.pixels[0] > 0.1, list(rendered.pixels[:4])
+            bpy.data.images.remove(rendered)
+            assert unrelated.is_dirty
+    assert scene.camera is None
+    print('RENDER_ELIGIBILITY_OK', result)
+finally:
+    manager.close()
+""")
+    checked = subprocess.run(
+        [
+            os.environ["BLENDER_TEST_EXECUTABLE"],
+            "--background",
+            "--factory-startup",
+            "--offline-mode",
+            "--disable-autoexec",
+            "--python-exit-code",
+            "1",
+            "--python",
+            str(script),
+        ],
+        env=blender_environment(tmp_path / "profile"),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    assert "RENDER_ELIGIBILITY_OK" in checked.stdout

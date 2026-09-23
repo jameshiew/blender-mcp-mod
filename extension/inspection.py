@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
     class ModifierProperties(Protocol):
         inputs: object
+        outputs: object
 
     AnimationEntry: TypeAlias = (
         tuple[Literal["NLA_TRACK"], dict[str, object], bpy.types.NlaTrack]
@@ -375,6 +376,7 @@ def _owner(data_type: str, data_name: str) -> bpy.types.ID:
         "WORLD": "worlds",
         "WORLD_NODES": "worlds",
         "SCENE": "scenes",
+        "COMPOSITOR_NODES": "scenes",
         "NODE_GROUP": "node_groups",
     }
     if not isinstance(data_type, str) or data_type not in collections:
@@ -388,6 +390,8 @@ def _owner(data_type: str, data_name: str) -> bpy.types.ID:
         owner = getattr(owner.data, "shape_keys", None)
     elif data_type in {"MATERIAL_NODES", "WORLD_NODES"}:
         owner = owner.node_tree
+    elif data_type == "COMPOSITOR_NODES":
+        owner = owner.compositing_node_group
     if owner is None:
         raise ValueError(f"{data_name} has no {data_type} data")
     return owner
@@ -415,6 +419,7 @@ def _socket_info(socket: bpy.types.NodeSocket, index: int) -> dict[str, object]:
         "name": socket.name,
         "type": socket.bl_idname,
         "is_linked": socket.is_linked,
+        "is_multi_input": socket.is_multi_input,
         "enabled": socket.enabled,
         "hide_value": socket.hide_value,
     }
@@ -479,6 +484,7 @@ def _link_info(link: bpy.types.NodeLink) -> dict[str, object]:
         "to_socket": link.to_socket.identifier if link.to_socket else None,
         "is_muted": link.is_muted,
         "is_valid": link.is_valid,
+        "multi_input_sort_id": link.multi_input_sort_id,
     }
 
 
@@ -592,7 +598,11 @@ def _modifier_info(modifier: bpy.types.Modifier, index: int) -> dict[str, object
             item for item in _interface_sockets(node_group) if item.in_out == "INPUT"
         ]
 
-        def input_info(item: bpy.types.NodeTreeInterfaceSocket) -> dict[str, object]:
+        properties = cast(
+            "ModifierProperties", cast("bpy.types.NodesModifier", modifier).properties
+        )
+
+        def socket_info(item: bpy.types.NodeTreeInterfaceSocket) -> dict[str, object]:
             key = item.identifier
             result: dict[str, object] = {
                 "name": item.name,
@@ -600,15 +610,12 @@ def _modifier_info(modifier: bpy.types.Modifier, index: int) -> dict[str, object
                 "socket_type": item.socket_type,
             }
             value = getattr(
-                cast(
-                    "ModifierProperties",
-                    cast("bpy.types.NodesModifier", modifier).properties,
-                ).inputs,
+                properties.inputs if item.in_out == "INPUT" else properties.outputs,
                 key,
                 None,
             )
             if value is not None:
-                for field in ("value", "type", "attribute_name"):
+                for field in ("value", "type", "attribute_name", "layer_name"):
                     if hasattr(value, field):
                         result[field] = _value(getattr(value, field))
                 if hasattr(value, "type"):
@@ -616,7 +623,17 @@ def _modifier_info(modifier: bpy.types.Modifier, index: int) -> dict[str, object
             return result
 
         result["node_group"] = _ref(node_group)
-        result["inputs"] = _limited(inputs, 0, DETAIL_LIMIT, input_info)
+        result["inputs"] = _limited(inputs, 0, DETAIL_LIMIT, socket_info)
+        result["outputs"] = _limited(
+            [
+                item
+                for item in _interface_sockets(node_group)
+                if item.in_out == "OUTPUT"
+            ],
+            0,
+            DETAIL_LIMIT,
+            socket_info,
+        )
     return result
 
 

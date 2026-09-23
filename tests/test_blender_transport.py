@@ -47,6 +47,7 @@ addon_utils.enable(name, default_set=True)
 addon = sys.modules[name]
 addon_utils.disable(name, default_set=True)
 server = addon.server.BlenderMCPServer(port=0)
+server.start()
 bpy.types.blendermcp_server = server
 addon_utils.enable(name, default_set=True)
 Path({str(ready)!r}).write_text(json.dumps({{"port": server.port, "running": server.running, "error": server.last_error, "version": bpy.app.version_string}}))
@@ -136,6 +137,11 @@ bpy.app.timers.register(finish, persistent=True)
             assert (
                 state["version"] in json.loads(result["content"][0]["text"])["result"]
             )
+            interrupted = client.call(
+                "execute_blender_code", {"code": "raise SystemExit('contained')"}
+            )
+            assert interrupted["isError"]
+            assert "SystemExit" in interrupted["structuredContent"]["error_message"]
             for code, params, expected in [
                 (
                     "import math\nobj = bpy.data.objects.new('Namespace test', None)\ndef helper():\n    return math.sqrt(16), obj.name",
@@ -164,6 +170,16 @@ bpy.app.timers.register(finish, persistent=True)
                 result = client.call(name, arguments)
                 assert not result.get("isError"), result
                 return result["structuredContent"]
+
+            assert (
+                call(
+                    "execute_blender_code",
+                    {
+                        "code": "print(hasattr(bpy.types.blendermcp_server, 'server_thread'))"
+                    },
+                )["result"]
+                == "False\n"
+            )
 
             call(
                 "execute_blender_code",
@@ -395,6 +411,54 @@ bpy.context.view_layer.update()
                     "matching_objects"
                 ]
                 == 1
+            )
+            lifecycle_file = tmp_path / "lifecycle.blend"
+            call(
+                "execute_blender_code",
+                {
+                    "code": f"bpy.ops.wm.save_as_mainfile(filepath={str(lifecycle_file)!r}, copy=True, check_existing=False)"
+                },
+            )
+            call(
+                "execute_blender_code",
+                {"code": "cached_scene = bpy.context.scene", "namespace": "lifecycle"},
+            )
+            call(
+                "execute_blender_code",
+                {
+                    "code": f"bpy.ops.wm.open_mainfile(filepath={str(lifecycle_file)!r}, load_ui=False, use_scripts=False)"
+                },
+            )
+            assert (
+                call(
+                    "execute_blender_code",
+                    {
+                        "code": "print('cached_scene' in globals())",
+                        "namespace": "lifecycle",
+                    },
+                )["result"]
+                == "False\n"
+            )
+            call(
+                "execute_blender_code",
+                {
+                    "code": "bpy.ops.ed.undo_push(message='MCP baseline')\nbpy.context.scene['lifecycle_marker'] = 1\nbpy.ops.ed.undo_push(message='MCP change')"
+                },
+            )
+            call(
+                "execute_blender_code",
+                {"code": "cached_scene = bpy.context.scene", "namespace": "lifecycle"},
+            )
+            call("execute_blender_code", {"code": "bpy.ops.ed.undo()"})
+            assert (
+                call(
+                    "execute_blender_code",
+                    {
+                        "code": "print('cached_scene' in globals())",
+                        "namespace": "lifecycle",
+                    },
+                )["result"]
+                == "False\n"
             )
             print(
                 f"Native Blender {state['version']}: TLS authentication, Python namespaces/diagnostics, scene pagination, world transforms, and viewport capture passed"

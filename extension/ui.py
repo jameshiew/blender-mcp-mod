@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 import bpy
+from bpy.app.handlers import persistent
 
 from .context import current_scene
 from .metadata import addon_metadata
@@ -79,6 +80,8 @@ def start_server(port: int) -> BlenderMCPServer:
     if server is None:
         server = BlenderMCPServer(port=port)
         cast("ServerRegistry", bpy.types).blendermcp_server = server
+    elif not server.running:
+        server.port = port
     server.start()
     scene = getattr(bpy.context, "scene", None)
     if scene is not None:
@@ -165,12 +168,37 @@ SCENE_PROPERTIES = {
 }
 
 
+@persistent
+def clear_execution_namespaces(_data: object) -> None:
+    server = cast(
+        BlenderMCPServer | None, getattr(bpy.types, "blendermcp_server", None)
+    )
+    if server is not None:
+        server.execution.clear_namespaces()
+
+
+@persistent
+def shutdown_server(_data: object) -> None:
+    stop_server()
+
+
+HANDLERS = (
+    (bpy.app.handlers.load_pre, clear_execution_namespaces),
+    (bpy.app.handlers.undo_pre, clear_execution_namespaces),
+    (bpy.app.handlers.redo_pre, clear_execution_namespaces),
+    (bpy.app.handlers.exit_pre, shutdown_server),
+)
+
+
 def register() -> None:
     addon_metadata()
     for name, prop in SCENE_PROPERTIES.items():
         setattr(bpy.types.Scene, name, prop)
     for cls in CLASSES:
         bpy.utils.register_class(cls)
+    for handlers, callback in HANDLERS:
+        if callback not in handlers:
+            handlers.append(callback)
     scene = getattr(bpy.context, "scene", None)
     if getattr(scene, "blendermcp_auto_start_server", True):
         start_server(getattr(scene, "blendermcp_port", 9876))
@@ -178,6 +206,9 @@ def register() -> None:
 
 def unregister() -> None:
     stop_server()
+    for handlers, callback in HANDLERS:
+        if callback in handlers:
+            handlers.remove(callback)
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)
     for name in SCENE_PROPERTIES:

@@ -1,13 +1,13 @@
 [package]
 name = "blender-mcp"
-version = "8.2.0+mod"
+version = "9.0.0+mod"
 edition = "2024"
 description = "Blender integration through the Model Context Protocol"
 license = "MIT"
 repository = "https://github.com/jameshiew/blender-mcp-mod"
 
 [package.metadata.blender]
-protocol-version = 8
+protocol-version = 9
 
 [dependencies]
 anyhow = "1.0.104"

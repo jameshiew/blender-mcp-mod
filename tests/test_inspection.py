@@ -111,7 +111,7 @@ def test_shared_action_slot_is_filtered_in_every_layer_and_strip(inspection):
     assert list(module._action_curves(action, None)) == []
 
 
-@pytest.mark.parametrize("input_type", ["VALUE", "ATTRIBUTE"])
+@pytest.mark.parametrize("input_type", ["VALUE", "ATTRIBUTE", "LAYER", "FALLBACK"])
 def test_geometry_nodes_input_overrides(inspection, input_type):
     module, bpy = inspection
     bpy.types.Modifier = SimpleNamespace(bl_rna=SimpleNamespace(properties={}))
@@ -147,7 +147,7 @@ def test_geometry_nodes_input_overrides(inspection, input_type):
         properties = SimpleNamespace(
             inputs=SimpleNamespace(
                 Socket_2=SimpleNamespace(
-                    value=4, type=input_type, attribute_name="height"
+                    value=4, type=input_type, attribute_name="height", layer_name="Ink"
                 )
             )
         )
@@ -167,8 +167,22 @@ def test_geometry_nodes_input_overrides(inspection, input_type):
             "type": input_type,
             "use_attribute": input_type == "ATTRIBUTE",
             "attribute_name": "height",
+            "layer_name": "Ink",
         },
     ]
+    assert result["outputs"]["items"] == []
+
+
+def test_compositor_animation_owner_uses_scene_node_group(inspection):
+    module, bpy = inspection
+    tree = SimpleNamespace(name="Compositing")
+    bpy.data = SimpleNamespace(
+        scenes={"Scene": SimpleNamespace(compositing_node_group=tree)}
+    )
+    assert module._owner("COMPOSITOR_NODES", "Scene") is tree
+    bpy.data.scenes["Scene"].compositing_node_group = None
+    with pytest.raises(ValueError, match="has no COMPOSITOR_NODES"):
+        module._owner("COMPOSITOR_NODES", "Scene")
 
 
 def test_unsupported_settings_are_explicit_and_reads_do_not_write(inspection):

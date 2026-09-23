@@ -295,6 +295,19 @@ def test_parented_object_distinguishes_local_and_world_transforms(monkeypatch):
     assert "mesh" not in parent_info
 
 
+@pytest.mark.parametrize(
+    "mode, value",
+    [("QUATERNION", [0.5, 0.5, 0.5, 0.5]), ("AXIS_ANGLE", [1.2, 0, 0, 1])],
+)
+def test_object_rotation_uses_active_representation(monkeypatch, mode, value):
+    obj = scene_object("Rotated")
+    obj.rotation_mode = mode
+    obj.rotation_quaternion = [0.5, 0.5, 0.5, 0.5]
+    obj.rotation_axis_angle = [1.2, 0, 0, 1]
+    scene_api, _ = load_scene(monkeypatch, [obj])
+    assert scene_api.get_object_info(obj.name)["rotation"] == value
+
+
 @pytest.mark.parametrize("name", ["", None, 42, []])
 def test_object_rejects_invalid_names_before_data_access(monkeypatch, name):
     scene_api, bpy = load_scene(monkeypatch)

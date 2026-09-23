@@ -18,6 +18,7 @@ def run_checks(server):
     frame = (scene.frame_current, scene.frame_subframe)
     selection = list(bpy.context.selected_objects or ())
     active = bpy.context.view_layer.objects.active
+    original_compositor = scene.compositing_node_group
     groups = [
         bpy.data.objects,
         bpy.data.meshes,
@@ -92,6 +93,12 @@ def run_checks(server):
         factor = cast("NodeInterface", geo.interface).new_socket(
             name="Height", in_out="INPUT", socket_type="NodeSocketFloat"
         )
+        layer_socket = cast("NodeInterface", geo.interface).new_socket(
+            name="Selection", in_out="INPUT", socket_type="NodeSocketBool"
+        )
+        output_socket = cast("NodeInterface", geo.interface).new_socket(
+            name="Weight", in_out="OUTPUT", socket_type="NodeSocketFloat"
+        )
         node_mod = cast(
             bpy.types.NodesModifier, obj.modifiers.new("Procedural", "NODES")
         )
@@ -102,6 +109,30 @@ def run_checks(server):
         input_property.value = 3.75
         input_property.type = "ATTRIBUTE"
         input_property.attribute_name = "height"
+        layer_property = getattr(
+            cast("ModifierProperties", node_mod.properties).inputs,
+            layer_socket.identifier,
+        )
+        layer_property.type = "LAYER"
+        layer_property.layer_name = "Ink"
+        output_property = getattr(
+            cast("ModifierProperties", node_mod.properties).outputs,
+            output_socket.identifier,
+        )
+        output_property.attribute_name = "weight"
+
+        compositor = bpy.data.node_groups.new(
+            "Inspection.Compositor", "CompositorNodeTree"
+        )
+        scene.compositing_node_group = compositor
+        compositor_value = compositor.nodes.new("ShaderNodeValue")
+        compositor_value.outputs[0].keyframe_insert("default_value", frame=1)
+
+        first = geo.nodes.new("GeometryNodeMeshCube")
+        second = geo.nodes.new("GeometryNodeMeshUVSphere")
+        join = geo.nodes.new("GeometryNodeJoinGeometry")
+        geo.links.new(first.outputs["Mesh"], join.inputs["Geometry"])
+        geo.links.new(second.outputs["Mesh"], join.inputs["Geometry"])
         action = bpy.data.actions.new("Inspection.SharedAction")
         own_slot = action.slots.new("OBJECT", obj.name)
         other_slot = action.slots.new("OBJECT", target.name)
@@ -176,6 +207,43 @@ def run_checks(server):
             height["value"] == 3.75
             and height.get("type", "ATTRIBUTE") == "ATTRIBUTE"
             and height["attribute_name"] == "height"
+        )
+        selection_input = next(item for item in inputs if item["name"] == "Selection")
+        assert (
+            selection_input["type"] == "LAYER"
+            and selection_input["layer_name"] == "Ink"
+        ), selection_input
+        output_info = server.handlers["get_modifier_info"](
+            object_name=obj.name, modifier_name="Procedural"
+        )["outputs"]["items"]
+        assert (
+            next(item for item in output_info if item["name"] == "Weight")[
+                "attribute_name"
+            ]
+            == "weight"
+        ), output_info
+        geometry_group = server.handlers["get_node_group_info"](
+            node_group_name=geo.name
+        )
+        join_info = next(
+            node
+            for node in geometry_group["nodes"]["items"]
+            if node["name"] == join.name
+        )
+        assert join_info["inputs"]["items"][0]["is_multi_input"], join_info
+        join_links = [
+            link
+            for link in geometry_group["incoming_links"]["items"]
+            if link["to_node"] == join.name
+        ]
+        assert len({link["multi_input_sort_id"] for link in join_links}) == 2, (
+            join_links
+        )
+        compositor_animation = server.handlers["get_animation_info"](
+            data_name=scene.name, data_type="COMPOSITOR_NODES"
+        )
+        assert compositor_animation["counts"]["ACTION_CHANNEL"] == 1, (
+            compositor_animation
         )
         material_result = server.handlers["get_material_info"](
             material_name=material.name, limit=100
@@ -301,6 +369,7 @@ def run_checks(server):
             "read_only": True,
         }
     finally:
+        scene.compositing_node_group = original_compositor
         for group, before in zip(groups, original):
             for item in set(group) - before:
                 cast("IDCollection", group).remove(item, do_unlink=True)

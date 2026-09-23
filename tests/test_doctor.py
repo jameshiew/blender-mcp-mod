@@ -75,7 +75,7 @@ def run_connected(binary, server, *arguments, drain=True, environment=None):
                 process.kill()
                 pytest.fail("doctor did not finish")
             if drain:
-                server._drain_command_queue()
+                server._tick()
             time.sleep(0.01)
         stdout, stderr = process.communicate(timeout=1)
         return subprocess.CompletedProcess(
@@ -256,9 +256,9 @@ def test_doctor_bounds_wait_for_busy_blender(binary, doctor_server):
         run_connected(binary, doctor_server, "--json", "--timeout", "1", drain=False)
     )
     assert time.monotonic() - started < 4
-    assert status["tls"]["status"] == "ok"
-    assert status["addon"]["status"] == "error"
-    assert "busy" in status["addon"]["detail"]
+    assert status["tls"]["status"] == "error"
+    assert status["addon"]["status"] == "unavailable"
+    assert "timed out" in status["tls"]["detail"]
 
 
 def test_doctor_bounds_tls_handshake(binary):

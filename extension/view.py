@@ -21,6 +21,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_FLOAT_MAX = 3.4028234663852886e38
+_PANORAMA_TYPES = (
+    "EQUIRECTANGULAR",
+    "EQUIANGULAR_CUBEMAP_FACE",
+    "MIRRORBALL",
+    "FISHEYE_EQUIDISTANT",
+    "FISHEYE_EQUISOLID",
+    "FISHEYE_LENS_POLYNOMIAL",
+    "CENTRAL_CYLINDRICAL",
+)
+
 
 class CaptureOptions(TypedDict, total=False):
     viewport_index: int
@@ -104,6 +115,7 @@ def camera_info(obj: bpy.types.Object) -> dict[str, object]:
     return {
         "data_name": data.name,
         "projection": data.type,
+        "panorama_type": data.panorama_type,
         "lens": data.lens,
         "lens_unit": data.lens_unit,
         "angle_x": data.angle_x,
@@ -120,6 +132,7 @@ def camera_info(obj: bpy.types.Object) -> dict[str, object]:
         "dof": {
             "use_dof": dof.use_dof,
             "focus_object": dof.focus_object.name if dof.focus_object else None,
+            "focus_subtarget": dof.focus_subtarget,
             "focus_distance": dof.focus_distance,
             "aperture_fstop": dof.aperture_fstop,
         },
@@ -128,7 +141,7 @@ def camera_info(obj: bpy.types.Object) -> dict[str, object]:
 
 def set_camera(
     object_name: str,
-    projection: Literal["PERSP", "ORTHO"] | None = None,
+    projection: Literal["PERSP", "ORTHO", "PANO"] | None = None,
     lens: float | None = None,
     ortho_scale: float | None = None,
     shift_x: float | None = None,
@@ -138,10 +151,20 @@ def set_camera(
     object_names: list[str] | None = None,
     padding: float = 1.1,
     make_active: bool = False,
+    sensor_fit: Literal["AUTO", "HORIZONTAL", "VERTICAL"] | None = None,
+    sensor_width: float | None = None,
+    sensor_height: float | None = None,
+    use_dof: bool | None = None,
+    focus_object: str | None = None,
+    focus_distance: float | None = None,
+    aperture_fstop: float | None = None,
+    panorama_type: str | None = None,
 ) -> dict[str, object]:
     if not isinstance(object_name, str) or not object_name:
         raise ValueError("object_name must be a non-empty string")
-    _choice("projection", projection, ("PERSP", "ORTHO"))
+    _choice("projection", projection, ("PERSP", "ORTHO", "PANO"))
+    _choice("sensor_fit", sensor_fit, ("AUTO", "HORIZONTAL", "VERTICAL"))
+    _choice("panorama_type", panorama_type, _PANORAMA_TYPES)
     for name, value, low, high in (
         ("lens", lens, 1, 5000),
         ("ortho_scale", ortho_scale, 0.000001, 1000000),
@@ -150,19 +173,42 @@ def set_camera(
         ("clip_start", clip_start, 0.000001, 1000000),
         ("clip_end", clip_end, 0.000001, 1000000),
         ("padding", padding, 1, 10),
+        ("sensor_width", sensor_width, 1, _FLOAT_MAX),
+        ("sensor_height", sensor_height, 1, _FLOAT_MAX),
+        ("focus_distance", focus_distance, 0, _FLOAT_MAX),
+        ("aperture_fstop", aperture_fstop, 0, _FLOAT_MAX),
     ):
         _number(name, value, low, high)
     _boolean("make_active", make_active)
+    _boolean("use_dof", use_dof)
+    if focus_object is not None and not isinstance(focus_object, str):
+        raise ValueError(
+            "focus_object must be an object name or an empty string to clear it"
+        )
     obj = current_scene().objects.get(object_name)
     if obj is None or obj.type != "CAMERA":
         raise ValueError(f"Camera not found in the active scene: {object_name}")
     data = cast("bpy.types.Camera", obj.data)
+    dof = data.dof
+    if dof is None:
+        raise ValueError("Camera has no depth-of-field settings")
     if not obj.is_editable or not data.is_editable:
         raise ValueError("Camera and camera data must be editable")
     if (clip_start if clip_start is not None else data.clip_start) >= (
         clip_end if clip_end is not None else data.clip_end
     ):
         raise ValueError("clip_start must be less than clip_end")
+    if panorama_type is not None and (projection or data.type) != "PANO":
+        raise ValueError("panorama_type requires a PANO camera")
+    focus = None
+    if focus_object:
+        focus = current_scene().objects.get(focus_object)
+        if focus is None:
+            raise ValueError(
+                f"Focus object not found in the active scene: {focus_object}"
+            )
+        if focus == obj:
+            raise ValueError("A camera cannot use itself as its focus object")
     settings = {
         name: value
         for name, value in {
@@ -173,6 +219,10 @@ def set_camera(
             "shift_y": shift_y,
             "clip_start": clip_start,
             "clip_end": clip_end,
+            "sensor_fit": sensor_fit,
+            "sensor_width": sensor_width,
+            "sensor_height": sensor_height,
+            "panorama_type": panorama_type,
         }.items()
         if value is not None
     }
@@ -212,6 +262,16 @@ def set_camera(
         framed = [target.name for target in objects]
     for name, value in settings.items():
         setattr(data, name, value)
+    for name, value in {
+        "use_dof": use_dof,
+        "focus_distance": focus_distance,
+        "aperture_fstop": aperture_fstop,
+    }.items():
+        if value is not None:
+            setattr(dof, name, value)
+    if focus_object is not None:
+        dof.focus_object = focus
+        dof.focus_subtarget = ""
     if location is not None:
         matrix = obj.matrix_world.copy()
         matrix.translation = location

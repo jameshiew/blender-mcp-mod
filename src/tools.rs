@@ -104,7 +104,7 @@ pub async fn execute(
         result["up_to_date"] = json!(
             result["protocol_version"]
                 .as_u64()
-                .is_some_and(|v| v >= PROTOCOL_VERSION)
+                .is_some_and(|v| v == PROTOCOL_VERSION)
                 && result["addon_build_version"] == env!("CARGO_PKG_VERSION")
         );
         result["update_command"] = json!("blender-mcp install-addon");
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn catalog_preserves_tools_without_collection_parameters() {
         let tools = definitions().unwrap();
-        assert_eq!(tools.len(), 28);
+        assert_eq!(tools.len(), 29);
         for definition in tools {
             assert!(!definition.tool.name.contains("telemetry"));
             assert!(!definition.tool.name.contains("trajectory"));
@@ -181,6 +181,26 @@ mod tests {
             args("get_scene_info", json!({"user_prompt":"ignored"}))
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn validates_api_inspection_arguments() {
+        for invalid in [
+            json!({}),
+            json!({"identifier":""}),
+            json!({"identifier":"Camera", "kind":"INSTANCE"}),
+            json!({"identifier":"Camera", "limit":101}),
+            json!({"identifier":"Camera", "offset":-1}),
+        ] {
+            assert!(args("get_blender_api_info", invalid).is_err());
+        }
+        assert_eq!(
+            args("get_blender_api_info", json!({"identifier":"Camera"})).unwrap(),
+            json!({"identifier":"Camera", "kind":"TYPE", "offset":0, "limit":50})
+                .as_object()
+                .unwrap()
+                .clone()
         );
     }
 

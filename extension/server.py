@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 
 import bpy
 
-from . import inspection, scene, view
+from . import api, inspection, scene, view
 from .connection import config_directory
 from .context import current_scene
 from .execution import ExecutionSession
@@ -37,6 +37,7 @@ class BlenderMCPServer(CommandServer):
         self.poll = self.renders.poll
         self.handlers: dict[str, Callable[..., Mapping[str, object]]] = {
             "get_addon_info": self.get_addon_info,
+            "get_blender_api_info": api.get_blender_api_info,
             "get_scene_info": scene.get_scene_info,
             "get_object_info": scene.get_object_info,
             "get_material_info": inspection.material_info,
