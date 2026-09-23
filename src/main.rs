@@ -1,7 +1,7 @@
-use std::{io::IsTerminal, path::PathBuf};
+use std::{io::IsTerminal, path::PathBuf, process::ExitCode, time::Duration};
 
-use anyhow::{Context, Result};
-use blender_mcp::{addon, security, server::BlenderServer};
+use anyhow::Result;
+use blender_mcp::{addon, connection::endpoint, doctor, security, server::BlenderServer};
 use clap::{Parser, Subcommand};
 use rmcp::ServiceExt;
 
@@ -37,10 +37,20 @@ enum Command {
     },
     #[command(about = "Create local TLS credentials without replacing an existing pairing")]
     SetupConnection,
+    #[command(
+        about = "Report connection, credentials, add-on, and Blender runtime status",
+        after_help = "Exit status: 0 = ready (possibly with warnings), 1 = failed checks.\nRuntime details depend on the installed add-on version."
+    )]
+    Doctor {
+        #[arg(long, help = "Output the report as JSON")]
+        json: bool,
+        #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..=300), help = "Timeout in seconds for each network check")]
+        timeout: u64,
+    },
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<ExitCode> {
     match Cli::parse().command {
         Some(Command::PackageAddon { output }) => {
             println!("{}", addon::package(output)?.display());
@@ -61,13 +71,21 @@ async fn main() -> Result<()> {
         Some(Command::AddonPaths { blender }) => {
             addon::paths(&blender)?;
         }
+        Some(Command::Doctor { json, timeout }) => {
+            let report = doctor::check(Duration::from_secs(timeout)).await;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report.json())?);
+            } else {
+                print!("{report}");
+            }
+            return Ok(if report.healthy() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            });
+        }
         None => {
-            let host = std::env::var("BLENDER_HOST").unwrap_or_else(|_| "localhost".into());
-            let port = std::env::var("BLENDER_PORT")
-                .unwrap_or_else(|_| "9876".into())
-                .parse()
-                .context("BLENDER_PORT must be a port number")?;
-            anyhow::ensure!(port != 0, "BLENDER_PORT must be between 1 and 65535");
+            let (host, port) = endpoint()?;
             if std::io::stdin().is_terminal() {
                 eprintln!(
                     "Waiting for an MCP client on stdin. Configure your client to launch blender-mcp; Ctrl-C exits."
@@ -82,5 +100,5 @@ async fn main() -> Result<()> {
             }
         }
     }
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }

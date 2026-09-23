@@ -24,7 +24,10 @@ def _install_bpy_stubs(monkeypatch, scene=None, selected_objects=()):
         scene=scene,
         selected_objects=list(selected_objects),
         view_layer=types.SimpleNamespace(update=lambda: None),
+        mode="OBJECT",
+        preferences=types.SimpleNamespace(addons={}),
     )
+    bpy.data = types.SimpleNamespace(filepath="", is_saved=False, is_dirty=False)
     bpy.ops = types.SimpleNamespace(
         import_scene=types.SimpleNamespace(gltf=_unexpected_import),
         wm=types.SimpleNamespace(obj_import=_unexpected_import),
@@ -57,6 +60,7 @@ def _install_bpy_stubs(monkeypatch, scene=None, selected_objects=()):
     app.version = BLENDER_VERSION
     app.version_string = BLENDER_VERSION_MIN
     app.background = False
+    app.binary_path = "/test/blender"
     app.online_access = True
     app.handlers = handlers
     app.timers = types.SimpleNamespace(

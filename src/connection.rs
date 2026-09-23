@@ -13,6 +13,16 @@ use tokio_rustls::{TlsConnector, client::TlsStream, rustls::ClientConfig};
 
 pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 
+pub fn endpoint() -> Result<(String, u16)> {
+    let host = std::env::var("BLENDER_HOST").unwrap_or_else(|_| "localhost".into());
+    let port = std::env::var("BLENDER_PORT")
+        .unwrap_or_else(|_| "9876".into())
+        .parse()
+        .context("BLENDER_PORT must be a port number")?;
+    anyhow::ensure!(port != 0, "BLENDER_PORT must be between 1 and 65535");
+    Ok((host, port))
+}
+
 pub struct BlenderConnection {
     host: String,
     port: u16,
@@ -22,6 +32,13 @@ pub struct BlenderConnection {
 }
 
 impl BlenderConnection {
+    pub(crate) fn connected(host: String, port: u16, stream: TlsStream<TcpStream>) -> Self {
+        Self {
+            stream: Mutex::new(Some(stream)),
+            ..Self::new(host, port)
+        }
+    }
+
     pub fn new(host: String, port: u16) -> Self {
         Self {
             host,

@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping
 import bpy
 
 from . import inspection, scene, view
+from .connection import config_directory
 from .context import current_scene
 from .execution import ExecutionSession
 from .metadata import addon_metadata
@@ -90,6 +91,7 @@ class BlenderMCPServer(CommandServer):
     def get_addon_info(self) -> dict[str, object]:
         manifest, protocol = addon_metadata()
         version = manifest["version"]
+        active_scene = bpy.context.scene
         return {
             "name": manifest["name"],
             "addon_version": [
@@ -99,6 +101,30 @@ class BlenderMCPServer(CommandServer):
             "protocol_version": protocol,
             "capabilities": sorted(self.handlers),
             "blender_version": bpy.app.version_string,
+            "runtime": {
+                "blender_binary": bpy.app.binary_path,
+                "background": bpy.app.background,
+                "online_access": bpy.app.online_access,
+                "file": {
+                    "path": bpy.data.filepath,
+                    "saved": bpy.data.is_saved,
+                    "dirty": bpy.data.is_dirty,
+                },
+                "scene": getattr(active_scene, "name", None),
+                "mode": bpy.context.mode,
+                "listener": {
+                    "host": self.host,
+                    "port": self.port,
+                    "running": self.running,
+                },
+                "credential_directory": str(config_directory(self.config_dir)),
+                "sketchfab": {
+                    "enabled": bool(
+                        getattr(active_scene, "blendermcp_use_sketchfab", False)
+                    ),
+                    "api_key_configured": bool(sketchfab_api_key()),
+                },
+            },
         }
 
     def stop(self) -> None:

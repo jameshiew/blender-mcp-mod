@@ -122,7 +122,7 @@ pub fn setup(directory: &Path) -> Result<()> {
     Ok(())
 }
 
-fn validate_setup(data: &Value) -> Result<()> {
+pub(crate) fn validate_setup(data: &Value) -> Result<()> {
     client_config(data)?;
     let cert = CertificateDer::from_pem_slice(
         data["server_cert"]
