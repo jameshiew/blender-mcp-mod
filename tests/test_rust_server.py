@@ -116,7 +116,11 @@ class Client:
                 "capabilities": ["execute_code"],
                 "blender_version": "test",
             }
-        elif name in {"get_viewport_screenshot", "get_sketchfab_model_preview"}:
+        elif name in {
+            "get_viewport_screenshot",
+            "get_sketchfab_model_preview",
+            "get_render_image",
+        }:
             result = {
                 "image_data": base64.b64encode(b"image-bytes").decode(),
                 "format": "png",
@@ -186,6 +190,15 @@ CASES = [
     ("get_scene_info", {}, "get_scene_info", {}),
     ("get_object_info", {"object_name": "Cube"}, "get_object_info", {"name": "Cube"}),
     ("get_viewport_screenshot", {}, "get_viewport_screenshot", {"max_size": 1000}),
+    ("start_render", {}, "start_render", {}),
+    ("get_render_status", {}, "get_render_status", {}),
+    ("cancel_render", {"job_id": "job"}, "cancel_render", {"job_id": "job"}),
+    (
+        "get_render_image",
+        {"job_id": "job"},
+        "get_render_image",
+        {"job_id": "job", "max_size": 1000},
+    ),
     (
         "execute_blender_code",
         {"code": "print('ok')"},
@@ -222,7 +235,11 @@ def test_all_tools_over_stdio_and_tcp(client):
         result = client.call(name, arguments)
         assert not result.get("isError"), (name, result)
         assert client.commands[-1] == {"type": command, "params": params}
-        if name in {"get_viewport_screenshot", "get_sketchfab_model_preview"}:
+        if name in {
+            "get_viewport_screenshot",
+            "get_sketchfab_model_preview",
+            "get_render_image",
+        }:
             assert result["content"][0]["type"] == "image"
             assert result["content"][0]["mimeType"] == "image/png"
             assert base64.b64decode(result["content"][0]["data"]) == b"image-bytes"
@@ -233,7 +250,11 @@ def test_all_tools_over_stdio_and_tcp(client):
             assert "image_data" not in metadata
         elif name == "get_addon_status":
             assert json.loads(result["content"][0]["text"])["up_to_date"] is True
-        if name not in {"get_viewport_screenshot", "get_sketchfab_model_preview"}:
+        if name not in {
+            "get_viewport_screenshot",
+            "get_sketchfab_model_preview",
+            "get_render_image",
+        }:
             assert result["structuredContent"] == json.loads(
                 result["content"][0]["text"]
             )
@@ -254,6 +275,8 @@ def test_tool_annotations_distinguish_inspection_edits_and_network(client):
         "get_scene_info",
         "get_object_info",
         "get_viewport_screenshot",
+        "get_render_status",
+        "get_render_image",
     ):
         assert catalog[name]["annotations"]["readOnlyHint"] is True
         assert catalog[name]["annotations"]["openWorldHint"] is False
@@ -276,6 +299,41 @@ def test_tool_annotations_distinguish_inspection_edits_and_network(client):
         "idempotentHint": False,
         "openWorldHint": True,
     }
+    assert catalog["start_render"]["annotations"] == {
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    }
+    assert catalog["cancel_render"]["annotations"] == {
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+
+
+def test_render_arguments_and_failures_over_mcp(client):
+    arguments = {"scene_name": "Scene", "frame": 25, "resolution_percentage": 50}
+    assert not client.call("start_render", arguments).get("isError")
+    assert client.commands[-1] == {"type": "start_render", "params": arguments}
+    count = len(client.commands)
+    for name, arguments in [
+        ("start_render", {"frame": True}),
+        ("start_render", {"resolution_percentage": 0}),
+        ("start_render", {"resolution_percentage": 101}),
+        ("start_render", {"scene_name": ""}),
+        ("cancel_render", {}),
+        ("get_render_image", {"job_id": ""}),
+        ("get_render_image", {"job_id": "job", "max_size": 4097}),
+    ]:
+        assert client.call(name, arguments)["isError"]
+    assert len(client.commands) == count
+    status = {"job_id": "job", "state": "failed", "error_message": "Render failed"}
+    client.respond = lambda command: {"status": "success", "result": status}
+    response = client.call("get_render_status", {"job_id": "job"})
+    assert not response.get("isError")
+    assert response["structuredContent"] == status
 
 
 def test_scene_filters_are_forwarded_and_invalid_inputs_stay_local(client):

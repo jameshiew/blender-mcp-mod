@@ -118,6 +118,61 @@
     }
   },
   {
+    "name": "start_render",
+    "description": "Render one still frame from a snapshot in a separate Blender process. Returns a job_id immediately after the snapshot is written; poll get_render_status, then use get_render_image. Uses the scene's active camera and render settings without changing the open scene. Optional resolution_percentage applies only to this job. Only one job can run at a time. External assets and caches must be saved on disk; Python auto-execution and compositor file-output nodes are disabled in the worker. The latest eight jobs are retained until the add-on server stops. A client timeout does not cancel a job; call get_render_status without job_id to find the latest job before retrying.",
+    "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scene_name": {"type": "string", "minLength": 1, "description": "Exact scene name. Omit for the active scene."},
+        "frame": {"type": "integer", "minimum": -1048574, "maximum": 1048574, "description": "Frame to render. Omit for the scene's current frame."},
+        "resolution_percentage": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Override the scene's resolution percentage for this job only."}
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_render_status",
+    "description": "Get a render job's state, phase, elapsed time, scene, frame, and image availability. States are running, cancelling, completed, cancelled, and failed. A failed job includes error_message. Omit job_id to inspect the latest job, including after an uncertain start_render response. Jobs expire when the add-on server stops or eight newer jobs have started.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "job_id": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Job ID returned by start_render. Omit for the latest job."}
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cancel_render",
+    "description": "Request cancellation of one render worker without interrupting the open Blender scene. Returns its current status; poll get_render_status until cancelled. Repeated requests are safe. A job that already finished keeps its completed, failed, or cancelled state. Stopping the add-on also stops its render worker.",
+    "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "job_id": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Exact job ID returned by start_render."}
+      },
+      "required": ["job_id"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_render_image",
+    "description": "Return a completed job's camera render as a PNG image with job metadata, returned dimensions, and source dimensions. This is the saved result for that job, independent of later scene changes or renders. The image is scaled down to max_size without changing the saved full-resolution result. Running, failed, cancelled, and expired jobs return an error.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "job_id": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Exact job ID returned by start_render."},
+        "max_size": {"type": "integer", "minimum": 1, "maximum": 4096, "default": 1000, "description": "Maximum pixel size of the largest returned image dimension."}
+      },
+      "required": ["job_id"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "get_sketchfab_status",
     "description": "Check if Sketchfab integration is enabled in Blender.\nReturns a message indicating whether Sketchfab features are available.",
     "annotations": {"readOnlyHint": true, "openWorldHint": true},

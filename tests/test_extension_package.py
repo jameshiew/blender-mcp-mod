@@ -60,6 +60,8 @@ def test_package_metadata_and_wheels(addon_package):
         assert json.loads(archive.read("protocol.json"))["version"] == PROTOCOL_VERSION
         assert archive.read("LICENSE") == (REPO_ROOT / "LICENSE").read_bytes()
         assert archive.read("__init__.py") == ROOT_ADDON.read_bytes()
+        for filename in ("render_jobs.py", "render_worker.py"):
+            assert archive.read(filename) == (ROOT_ADDON.parent / filename).read_bytes()
         for removed in (
             "telemetry",
             "trajectory",
@@ -75,6 +77,8 @@ def test_package_metadata_and_wheels(addon_package):
             assert removed not in archive.read("__init__.py").decode()
         assert set(archive.namelist()) == {
             "__init__.py",
+            "render_jobs.py",
+            "render_worker.py",
             "blender_manifest.toml",
             "protocol.json",
             "LICENSE",

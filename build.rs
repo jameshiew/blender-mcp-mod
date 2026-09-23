@@ -107,6 +107,14 @@ fn main() {
             fs::read("extension/__init__.py").unwrap(),
         ),
         (
+            "render_jobs.py".into(),
+            fs::read("extension/render_jobs.py").unwrap(),
+        ),
+        (
+            "render_worker.py".into(),
+            fs::read("extension/render_worker.py").unwrap(),
+        ),
+        (
             "blender_manifest.toml".into(),
             toml::to_string(&manifest).unwrap().into_bytes(),
         ),

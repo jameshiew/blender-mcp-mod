@@ -69,6 +69,7 @@ class BlenderMCPServer:
         self._clients = set()
         self._clients_lock = threading.Lock()
         self._execution_namespaces = {}
+        self._render_jobs = None
 
     def _load_tls_context(self):
         directory = self.config_dir
@@ -184,6 +185,10 @@ class BlenderMCPServer:
     def stop(self):
         self.running = False
 
+        if self._render_jobs is not None:
+            self._render_jobs.close()
+            self._render_jobs = None
+
         try:
             if bpy.app.timers.is_registered(self._drain_command_queue):
                 bpy.app.timers.unregister(self._drain_command_queue)
@@ -284,6 +289,9 @@ class BlenderMCPServer:
         """
         if not self.running:
             return None
+
+        if self._render_jobs is not None:
+            self._render_jobs.poll()
 
         while True:
             try:
@@ -399,6 +407,10 @@ class BlenderMCPServer:
             "get_object_info": self.get_object_info,
             "get_viewport_screenshot": self.get_viewport_screenshot,
             "execute_code": self.execute_code,
+            "start_render": self.start_render,
+            "get_render_status": self.get_render_status,
+            "cancel_render": self.cancel_render,
+            "get_render_image": self.get_render_image,
             "get_sketchfab_status": self.get_sketchfab_status,
         }
 
@@ -443,10 +455,36 @@ class BlenderMCPServer:
                     "get_object_info",
                     "get_viewport_screenshot",
                     "execute_code",
+                    "start_render",
+                    "get_render_status",
+                    "cancel_render",
+                    "get_render_image",
                 ]
             ),
             "blender_version": bpy.app.version_string,
         }
+
+    def start_render(self, scene_name=None, frame=None, resolution_percentage=None):
+        if self._render_jobs is None:
+            from .render_jobs import RenderJobs
+
+            self._render_jobs = RenderJobs()
+        return self._render_jobs.start(scene_name, frame, resolution_percentage)
+
+    def get_render_status(self, job_id=None):
+        if self._render_jobs is None:
+            raise ValueError("No render jobs in this server session")
+        return self._render_jobs.status(job_id)
+
+    def cancel_render(self, job_id):
+        if self._render_jobs is None:
+            raise ValueError("No render jobs in this server session")
+        return self._render_jobs.cancel(job_id)
+
+    def get_render_image(self, job_id, max_size=1000):
+        if self._render_jobs is None:
+            raise ValueError("No render jobs in this server session")
+        return self._render_jobs.image(job_id, max_size)
 
     def get_scene_info(
         self,

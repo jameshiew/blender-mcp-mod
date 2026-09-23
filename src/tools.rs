@@ -72,7 +72,10 @@ pub async fn execute(
 ) -> Result<CallToolResult> {
     let (command, params) = prepare(name, args).await?;
     let mut result = connection.send(&command, params).await?;
-    if name == "get_viewport_screenshot" || name == "get_sketchfab_model_preview" {
+    if matches!(
+        name,
+        "get_viewport_screenshot" | "get_sketchfab_model_preview" | "get_render_image"
+    ) {
         let data = result["image_data"].as_str().context(
             "Add-on did not return image data; run blender-mcp install-addon and restart Blender",
         )?;
@@ -126,7 +129,7 @@ mod tests {
     #[test]
     fn catalog_preserves_tools_without_collection_parameters() {
         let tools = definitions().unwrap();
-        assert_eq!(tools.len(), 9);
+        assert_eq!(tools.len(), 13);
         for definition in tools {
             assert!(!definition.tool.name.contains("telemetry"));
             assert!(!definition.tool.name.contains("trajectory"));
