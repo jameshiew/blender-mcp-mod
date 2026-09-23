@@ -2,3 +2,6 @@
 just = "latest"
 rust = "latest"
 uv = "latest"
+
+[env]
+UV_NO_CONFIG = "1"
