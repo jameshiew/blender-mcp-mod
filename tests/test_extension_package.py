@@ -62,6 +62,7 @@ def test_package_metadata_and_wheels(addon_package):
         assert archive.read("__init__.py") == ROOT_ADDON.read_bytes()
         for filename in (
             "geometry.py",
+            "inspection.py",
             "view.py",
             "recovery.py",
             "render_jobs.py",
@@ -84,6 +85,7 @@ def test_package_metadata_and_wheels(addon_package):
         assert set(archive.namelist()) == {
             "__init__.py",
             "geometry.py",
+            "inspection.py",
             "view.py",
             "recovery.py",
             "render_jobs.py",

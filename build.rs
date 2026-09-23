@@ -112,6 +112,10 @@ fn main() {
         ),
         ("view.py".into(), fs::read("extension/view.py").unwrap()),
         (
+            "inspection.py".into(),
+            fs::read("extension/inspection.py").unwrap(),
+        ),
+        (
             "recovery.py".into(),
             fs::read("extension/recovery.py").unwrap(),
         ),

@@ -187,6 +187,36 @@ def client(binary, tmp_path):
 
 CASES = [
     (
+        "get_material_info",
+        {"material_name": "Glass", "offset": 2, "limit": 5},
+        "get_material_info",
+        {"material_name": "Glass", "offset": 2, "limit": 5},
+    ),
+    (
+        "get_node_group_info",
+        {"node_group_name": "Plants"},
+        "get_node_group_info",
+        {"node_group_name": "Plants"},
+    ),
+    (
+        "get_modifier_info",
+        {"object_name": "Cube", "modifier_name": "Array"},
+        "get_modifier_info",
+        {"object_name": "Cube", "modifier_name": "Array"},
+    ),
+    (
+        "get_animation_info",
+        {"data_name": "Cube", "data_type": "OBJECT"},
+        "get_animation_info",
+        {"data_name": "Cube", "data_type": "OBJECT"},
+    ),
+    (
+        "get_object_info",
+        {"object_name": "Cube", "details": True},
+        "get_object_info",
+        {"name": "Cube", "details": True},
+    ),
+    (
         "create_checkpoint",
         {"label": "Before edits"},
         "create_checkpoint",
@@ -341,6 +371,10 @@ def test_tool_annotations_distinguish_inspection_edits_and_network(client):
     }
     for name in (
         "get_addon_status",
+        "get_material_info",
+        "get_node_group_info",
+        "get_modifier_info",
+        "get_animation_info",
         "get_scene_info",
         "get_object_info",
         "get_viewport_screenshot",
@@ -405,6 +439,23 @@ def test_tool_annotations_distinguish_inspection_edits_and_network(client):
     ],
 )
 def test_camera_viewport_schema_validation(client, name, arguments):
+    assert client.call(name, arguments)["isError"]
+    assert not client.commands
+
+
+@pytest.mark.parametrize(
+    "name, arguments",
+    [
+        ("get_object_info", {"object_name": "Cube", "details": 1}),
+        ("get_material_info", {"material_name": ""}),
+        ("get_material_info", {"material_name": "Glass", "limit": 101}),
+        ("get_node_group_info", {"node_group_name": "Plants", "offset": -1}),
+        ("get_modifier_info", {"object_name": "Cube"}),
+        ("get_animation_info", {"data_name": "Cube", "data_type": "ACTION"}),
+        ("get_animation_info", {"data_name": "Cube", "offset": True}),
+    ],
+)
+def test_inspection_schema_validation(client, name, arguments):
     assert client.call(name, arguments)["isError"]
     assert not client.commands
 

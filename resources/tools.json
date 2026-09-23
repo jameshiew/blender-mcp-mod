@@ -61,12 +61,72 @@
         "evaluated": {
           "type": "boolean",
           "description": "Include evaluated mesh counts, instance-source summaries, and bounds including instances (default false). Uses viewport modifier settings at the current frame."
+        },
+        "details": {
+          "type": "boolean",
+          "description": "Add concise material-slot, modifier-setting, and animation summaries (default false). Lists the first 20 material slots and modifiers with counts and truncation. Use get_material_info, get_node_group_info, get_modifier_info, and get_animation_info for focused inspection. Animation includes object, object data, and shape-key owners."
         }
       },
       "required": [
         "object_name"
       ],
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_material_info",
+    "description": "Inspect a material's settings, shader nodes, socket defaults, incoming links, image references/colorspaces, color ramps, and animation overview. Nodes are sorted by name; follow node_tree.nodes.next_offset with the same material to continue. Defaults to 20 nodes. Stored socket defaults are not evaluated shader output and may be unused when linked. Nested groups are references: use get_node_group_info for their contents. Material animation and shader animation are separate; use get_animation_info with MATERIAL or MATERIAL_NODES. Settings list omitted collections and read errors. Nested details cap at 64 sockets/settings, 16 array elements, and 2048 text characters; incoming links cap at 200 per page with explicit truncation. Does not change frames, compile shaders, load assets, or execute drivers.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "material_name": {"type": "string", "minLength": 1},
+        "offset": {"type": "integer", "minimum": 0, "description": "Node page start (default 0)."},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Nodes per page (default 20)."}
+      },
+      "required": ["material_name"], "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_node_group_info",
+    "description": "Inspect a shader or geometry node group by exact name, including its interface, node settings, sockets, incoming links, and animation overview. Nested groups stay as named references so recursive graphs cannot expand indefinitely. Follow nodes.next_offset to page nodes sorted by name. Uses the same nested-detail limits as get_material_info; interface sockets cap at 64 with explicit truncation. Geometry-node modifier input overrides are available from get_modifier_info.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "node_group_name": {"type": "string", "minLength": 1},
+        "offset": {"type": "integer", "minimum": 0},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+      },
+      "required": ["node_group_name"], "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_modifier_info",
+    "description": "Inspect one modifier by exact object and modifier names: stack index, viewport/render flags, writable scalar/vector settings, data-block references, and one level of nested settings. Geometry Nodes includes the node-group name, input overrides, and attribute-input switches. Lists omitted collections and read errors; caps settings/inputs at 64 and arrays at 16 elements with explicit truncation. Reports stored values at the current frame without applying modifiers or updating the dependency graph. Use get_object_info(evaluated=true) for the resulting geometry and get_animation_info for animated modifier channels on the object.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "object_name": {"type": "string", "minLength": 1},
+        "modifier_name": {"type": "string", "minLength": 1}
+      },
+      "required": ["object_name", "modifier_name"], "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_animation_info",
+    "description": "Inspect animation without changing the frame or evaluating drivers. Returns the assigned action/slot and paginated entries: active-action channels, drivers, NLA tracks, strips, strip-control channels, and NLA action channels. Includes only the owner's assigned slot from shared actions, across all layers/strips. Channel summaries give paths, component indices, frame ranges, keyframe/sample counts, interpolation counts, mute/validity, and F-curve modifiers. Drivers include expression and target references; NLA strips include scene ranges, action ranges, blending, influence, and repeat/scale. Channel ranges use action-local frames; strip ranges use scene frames. Follow entries.next_offset with the same owner. Nested F-curve modifiers and driver variables cap at 20; settings cap at 64 and text at 2048 with explicit truncation. Does not inspect constraints, simulation caches, or evaluated motion.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "data_name": {"type": "string", "minLength": 1, "description": "Exact object, material, world, scene, or node-group name. OBJECT_DATA and SHAPE_KEYS use the owning object's name; MATERIAL_NODES and WORLD_NODES use the material/world name."},
+        "data_type": {"type": "string", "enum": ["OBJECT", "OBJECT_DATA", "SHAPE_KEYS", "MATERIAL", "MATERIAL_NODES", "WORLD", "WORLD_NODES", "SCENE", "NODE_GROUP"], "description": "Animation owner (default OBJECT)."},
+        "offset": {"type": "integer", "minimum": 0},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+      },
+      "required": ["data_name"], "additionalProperties": false
     }
   },
   {

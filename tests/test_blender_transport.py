@@ -216,6 +216,44 @@ bpy.context.view_layer.update()
             assert child["dimensions"] == [2, 2, 2]
             assert child["mesh"] == {"vertices": 8, "edges": 12, "polygons": 6}
             assert child["modifiers"][0]["type"] == "BEVEL"
+            details = call(
+                "get_object_info", {"object_name": "Inspect.Child", "details": True}
+            )
+            assert (
+                details["details"]["modifiers"]["items"][0]["settings"]["values"][
+                    "segments"
+                ]
+                == 1
+            )
+            modifier = call(
+                "get_modifier_info",
+                {"object_name": "Inspect.Child", "modifier_name": "Bevel"},
+            )
+            assert modifier["type"] == "BEVEL"
+            assert (
+                call("get_animation_info", {"data_name": "Inspect.Child"})[
+                    "entry_count"
+                ]
+                == 0
+            )
+            call(
+                "execute_blender_code",
+                {
+                    "code": "material = bpy.data.materials.new('Inspect.Material')\nmaterial.use_nodes = True\nbpy.data.objects['Inspect.Child'].data.materials.append(material)\nbpy.data.node_groups.new('Inspect.Group', 'ShaderNodeTree')"
+                },
+            )
+            assert (
+                call("get_material_info", {"material_name": "Inspect.Material"})[
+                    "node_tree"
+                ]["node_count"]
+                == 2
+            )
+            assert (
+                call("get_node_group_info", {"node_group_name": "Inspect.Group"})[
+                    "node_count"
+                ]
+                == 0
+            )
             evaluated = call(
                 "get_object_info", {"object_name": "Inspect.Child", "evaluated": True}
             )

@@ -408,6 +408,10 @@ class BlenderMCPServer:
             "get_scene_info": self.get_scene_info,
             "get_addon_info": self.get_addon_info,
             "get_object_info": self.get_object_info,
+            "get_material_info": self.get_material_info,
+            "get_node_group_info": self.get_node_group_info,
+            "get_modifier_info": self.get_modifier_info,
+            "get_animation_info": self.get_animation_info,
             "set_camera": self.set_camera,
             "set_viewport": self.set_viewport,
             "get_viewport_screenshot": self.get_viewport_screenshot,
@@ -463,6 +467,10 @@ class BlenderMCPServer:
                     "get_scene_info",
                     "get_addon_info",
                     "get_object_info",
+                    "get_material_info",
+                    "get_node_group_info",
+                    "get_modifier_info",
+                    "get_animation_info",
                     "set_camera",
                     "set_viewport",
                     "get_viewport_screenshot",
@@ -606,12 +614,14 @@ class BlenderMCPServer:
         max_corner = mathutils.Vector(map(max, zip(*world_bbox_corners)))
         return [[*min_corner], [*max_corner]]
 
-    def get_object_info(self, name, evaluated=False):
+    def get_object_info(self, name, evaluated=False, details=False):
         """Get detailed information about a specific object"""
         if not isinstance(name, str) or not name:
             raise ValueError("name must be a non-empty string")
         if type(evaluated) is not bool:
             raise ValueError("evaluated must be a boolean")
+        if type(details) is not bool:
+            raise ValueError("details must be a boolean")
         obj = bpy.data.objects.get(name)
         if not obj:
             raise ValueError(f"Object not found: {name}")
@@ -675,7 +685,32 @@ class BlenderMCPServer:
 
             obj_info["evaluated"] = evaluated_geometry(obj)
 
+        if details:
+            from .inspection import object_details
+
+            obj_info["details"] = object_details(obj)
+
         return obj_info
+
+    def get_material_info(self, **params):
+        from .inspection import material_info
+
+        return material_info(**params)
+
+    def get_node_group_info(self, **params):
+        from .inspection import node_group_info
+
+        return node_group_info(**params)
+
+    def get_modifier_info(self, **params):
+        from .inspection import modifier_info
+
+        return modifier_info(**params)
+
+    def get_animation_info(self, **params):
+        from .inspection import animation_info
+
+        return animation_info(**params)
 
     def set_camera(self, **params):
         from .view import set_camera

@@ -304,6 +304,14 @@ def test_object_reports_missing_name(monkeypatch):
         server.get_object_info("Missing")
 
 
+@pytest.mark.parametrize("details", [None, 0, 1, "true", []])
+def test_object_rejects_invalid_details_before_data_access(monkeypatch, details):
+    server, bpy = scene_server(monkeypatch)
+    bpy.data = None
+    with pytest.raises(ValueError, match="details must be a boolean"):
+        server.get_object_info("Cube", details=details)
+
+
 @pytest.mark.parametrize("evaluated", [None, 0, 1, "true", []])
 def test_object_rejects_invalid_evaluated_before_data_access(monkeypatch, evaluated):
     server, bpy = scene_server(monkeypatch)
