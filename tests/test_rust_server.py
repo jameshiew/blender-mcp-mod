@@ -188,6 +188,18 @@ def client(binary, tmp_path):
 CASES = [
     ("get_addon_status", {}, "get_addon_info", {}),
     ("get_scene_info", {}, "get_scene_info", {}),
+    (
+        "set_camera",
+        {"object_name": "Camera", "lens": 85},
+        "set_camera",
+        {"object_name": "Camera", "lens": 85},
+    ),
+    (
+        "set_viewport",
+        {"view": "TOP", "frame": "ALL", "shading": "SOLID"},
+        "set_viewport",
+        {"view": "TOP", "frame": "ALL", "shading": "SOLID"},
+    ),
     ("get_object_info", {"object_name": "Cube"}, "get_object_info", {"name": "Cube"}),
     (
         "get_object_info",
@@ -196,6 +208,12 @@ CASES = [
         {"name": "Cube", "evaluated": True},
     ),
     ("get_viewport_screenshot", {}, "get_viewport_screenshot", {"max_size": 1000}),
+    (
+        "get_viewport_screenshot",
+        {"viewport_index": 1, "camera_only": True},
+        "get_viewport_screenshot",
+        {"max_size": 1000, "viewport_index": 1, "camera_only": True},
+    ),
     ("start_render", {}, "start_render", {}),
     ("get_render_status", {}, "get_render_status", {}),
     ("cancel_render", {"job_id": "job"}, "cancel_render", {"job_id": "job"}),
@@ -317,6 +335,33 @@ def test_tool_annotations_distinguish_inspection_edits_and_network(client):
         "idempotentHint": True,
         "openWorldHint": False,
     }
+    for name in ("set_camera", "set_viewport"):
+        assert catalog[name]["annotations"] == {
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+
+
+@pytest.mark.parametrize(
+    "name, arguments",
+    [
+        ("set_camera", {}),
+        ("set_camera", {"object_name": "Camera", "lens": 0}),
+        ("set_camera", {"object_name": "Camera", "lens": True}),
+        ("set_camera", {"object_name": "Camera", "object_names": []}),
+        ("set_viewport", {"view": "INVALID"}),
+        ("set_viewport", {"viewport_index": -1}),
+        ("set_viewport", {"overlays": 0}),
+        ("set_viewport", {"camera_zoom": 601}),
+        ("get_viewport_screenshot", {"camera_only": "yes"}),
+        ("get_viewport_screenshot", {"viewport_index": True}),
+    ],
+)
+def test_camera_viewport_schema_validation(client, name, arguments):
+    assert client.call(name, arguments)["isError"]
+    assert not client.commands
 
 
 @pytest.mark.parametrize("evaluated", [None, 0, "true", []])

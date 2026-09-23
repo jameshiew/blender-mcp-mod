@@ -405,6 +405,8 @@ class BlenderMCPServer:
             "get_scene_info": self.get_scene_info,
             "get_addon_info": self.get_addon_info,
             "get_object_info": self.get_object_info,
+            "set_camera": self.set_camera,
+            "set_viewport": self.set_viewport,
             "get_viewport_screenshot": self.get_viewport_screenshot,
             "execute_code": self.execute_code,
             "start_render": self.start_render,
@@ -453,6 +455,8 @@ class BlenderMCPServer:
                     "get_scene_info",
                     "get_addon_info",
                     "get_object_info",
+                    "set_camera",
+                    "set_viewport",
                     "get_viewport_screenshot",
                     "execute_code",
                     "start_render",
@@ -648,6 +652,11 @@ class BlenderMCPServer:
                 "polygons": len(mesh.polygons),
             }
 
+        if obj.type == "CAMERA" and obj.data:
+            from .view import camera_info
+
+            obj_info["camera"] = camera_info(obj)
+
         if evaluated:
             from .geometry import evaluated_geometry
 
@@ -655,14 +664,40 @@ class BlenderMCPServer:
 
         return obj_info
 
-    def get_viewport_screenshot(self, max_size=800, filepath=None, format="png"):
-        if not isinstance(max_size, int) or not 1 <= max_size <= 4096:
+    def set_camera(self, **params):
+        from .view import set_camera
+
+        return set_camera(**params)
+
+    def set_viewport(self, **params):
+        from .view import set_viewport
+
+        return set_viewport(**params)
+
+    def get_viewport_screenshot(
+        self,
+        max_size=800,
+        filepath=None,
+        format="png",
+        viewport_index=0,
+        camera_only=False,
+    ):
+        if type(max_size) is not int or not 1 <= max_size <= 4096:
             return {"error": "max_size must be an integer between 1 and 4096"}
+        if type(viewport_index) is not int or viewport_index < 0:
+            return {"error": "viewport_index must be a non-negative integer"}
+        if type(camera_only) is not bool:
+            return {"error": "camera_only must be a boolean"}
+        options = (
+            {"viewport_index": viewport_index, "camera_only": camera_only}
+            if viewport_index or camera_only
+            else {}
+        )
         if filepath:
-            return self._save_viewport_screenshot(max_size, filepath, format)
+            return self._save_viewport_screenshot(max_size, filepath, format, **options)
         with tempfile.TemporaryDirectory(prefix="blender_mcp_") as directory:
             path = os.path.join(directory, "viewport.png")
-            result = self._save_viewport_screenshot(max_size, path, "png")
+            result = self._save_viewport_screenshot(max_size, path, "png", **options)
             if result.get("success"):
                 with open(path, "rb") as image:
                     result["image_data"] = base64.b64encode(image.read()).decode(
@@ -672,108 +707,24 @@ class BlenderMCPServer:
                 result.pop("filepath", None)
             return result
 
-    def _save_viewport_screenshot(self, max_size=800, filepath=None, format="png"):
-        """
-        Capture a screenshot of the current 3D viewport and save it to the specified path.
-
-        Parameters:
-        - max_size: Maximum size in pixels for the largest dimension of the image
-        - filepath: Path where to save the screenshot file
-        - format: Image format (png, jpg, etc.)
-
-        Returns success/error status
-        """
-        # screen.screenshot_area captures the OS window framebuffer, which is
-        # all-black whenever the Blender window is not composited in the
-        # foreground (the normal case when Blender is driven headless-style via
-        # MCP). Render the viewport with gpu.types.GPUOffScreen.draw_view3d
-        # instead, which is independent of window compositing state, and fall
-        # back to the window grab if offscreen rendering is unavailable (e.g. no
-        # GPU context). The response reports which path produced the image.
+    def _save_viewport_screenshot(
+        self,
+        max_size=800,
+        filepath=None,
+        format="png",
+        viewport_index=0,
+        camera_only=False,
+    ):
         try:
             if not filepath:
                 return {"error": "No filepath provided"}
+            from .view import capture_viewport
 
-            area = region = space = None
-            for a in bpy.context.screen.areas:
-                if a.type == "VIEW_3D":
-                    area = a
-                    space = a.spaces.active
-                    region = next((r for r in a.regions if r.type == "WINDOW"), None)
-                    break
-
-            if not area or region is None or space is None:
-                return {"error": "No 3D viewport found"}
-
-            method = "offscreen"
-            try:
-                import gpu
-                import numpy as np
-
-                r3d = space.region_3d
-                src_w, src_h = region.width, region.height
-                if max(src_w, src_h) > max_size:
-                    s = max_size / max(src_w, src_h)
-                    width, height = max(1, int(src_w * s)), max(1, int(src_h * s))
-                else:
-                    width, height = src_w, src_h
-
-                offscreen = gpu.types.GPUOffScreen(width, height)
-                try:
-                    offscreen.draw_view3d(
-                        bpy.context.scene,
-                        bpy.context.view_layer,
-                        space,
-                        region,
-                        r3d.view_matrix,
-                        r3d.window_matrix,
-                        do_color_management=True,
-                    )
-                    buf = offscreen.texture_color.read()
-                finally:
-                    offscreen.free()
-
-                buf.dimensions = width * height * 4
-                pixels = (
-                    np.asarray(buf, dtype=np.float32) / 255.0
-                )  # GPU buffer is 0..255
-
-                image = bpy.data.images.new("mcp_viewport", width, height, alpha=True)
-                image.pixels.foreach_set(pixels.ravel())
-                image.filepath_raw = filepath
-                image.file_format = format.upper()
-                image.save()
-                bpy.data.images.remove(image)
-
-            except Exception as offscreen_err:
-                print(
-                    f"[BlenderMCP] offscreen capture failed ({offscreen_err}); "
-                    "falling back to window grab",
-                    flush=True,
-                )
-                method = "window_grab"
-                with bpy.context.temp_override(area=area):
-                    bpy.ops.screen.screenshot_area(filepath=filepath)
-                img = bpy.data.images.load(filepath)
-                width, height = img.size
-                if max(width, height) > max_size:
-                    s = max_size / max(width, height)
-                    width, height = int(width * s), int(height * s)
-                    img.scale(width, height)
-                    img.file_format = format.upper()
-                    img.save()
-                bpy.data.images.remove(img)
-
-            return {
-                "success": True,
-                "width": width,
-                "height": height,
-                "filepath": filepath,
-                "method": method,
-            }
-
-        except Exception as e:
-            return {"error": str(e)}
+            return capture_viewport(
+                max_size, filepath, format, viewport_index, camera_only
+            )
+        except Exception as error:
+            return {"error": str(error)}
 
     def execute_code(self, code, namespace=None, reset_namespace=False):
         """Execute arbitrary Blender Python code"""

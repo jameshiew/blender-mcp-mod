@@ -48,7 +48,7 @@
   },
   {
     "name": "get_object_info",
-    "description": "Inspect an object by exact name: local transforms, world matrix and location, dimensions, parent, collections, modifiers, visibility, materials, and mesh counts/bounds. Local location and Euler rotation (radians) are relative to the parent; use matrix_world for the full world transform. Top-level mesh counts describe the base mesh; bounds and dimensions use cached object bounds. With evaluated=true, adds evaluated data for the current frame and viewport dependency graph: mesh counts after modifiers, instance sources with per-copy mesh counts, mesh_including_instances totals, and world bounds/dimensions including generated instances. Evaluated bounds enclose transformed local mesh bounds. Meshes, curves, surfaces, text, and metaballs contribute mesh geometry; other types have null mesh, and bounds/dimensions are null when there are no vertices. Requires the object in the active view layer dependency graph. May be expensive for dense geometry.",
+    "description": "Inspect an object by exact name: local transforms, world matrix and location, dimensions, parent, collections, modifiers, visibility, materials, and mesh counts/bounds. Local location and Euler rotation (radians) are relative to the parent; use matrix_world for the full world transform. Top-level mesh counts describe the base mesh; bounds and dimensions use cached object bounds. With evaluated=true, adds evaluated data for the current frame and viewport dependency graph: mesh counts after modifiers, instance sources with per-copy mesh counts, mesh_including_instances totals, and world bounds/dimensions including generated instances. Evaluated bounds enclose transformed local mesh bounds. Meshes, curves, surfaces, text, and metaballs contribute mesh geometry; other types have null mesh, and bounds/dimensions are null when there are no vertices. Requires the object in the active view layer dependency graph. May be expensive for dense geometry. Camera objects also include projection, lens in millimetres, field-of-view angles in radians, sensor size/fit, shift, clipping, active-camera state, and depth-of-field settings.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -70,8 +70,186 @@
     }
   },
   {
+    "name": "set_camera",
+    "description": "Change camera projection, lens (millimetres), orthographic scale, shift, or clipping, and optionally make it the active scene camera. With object_names, fit evaluated object bounds while preserving camera orientation; padding adds a margin and fitting overrides ortho_scale. Clipping planes are not adjusted automatically. Supports perspective and orthographic fitting; mute camera constraints before fitting. Changes shared camera data. Returns camera settings and world transform. Inspect exact camera and target names first.",
+    "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "object_name": {
+          "type": "string",
+          "description": "Exact camera object name in the active scene.",
+          "minLength": 1
+        },
+        "projection": {
+          "type": "string",
+          "description": "Camera projection.",
+          "enum": [
+            "PERSP",
+            "ORTHO"
+          ]
+        },
+        "lens": {
+          "type": "number",
+          "description": "Focal length in millimetres; changes perspective camera zoom.",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "ortho_scale": {
+          "type": "number",
+          "description": "Orthographic camera scale in scene units; smaller values zoom in.",
+          "minimum": 1e-06,
+          "maximum": 1000000
+        },
+        "shift_x": {
+          "type": "number",
+          "description": "Horizontal lens shift.",
+          "minimum": -10,
+          "maximum": 10
+        },
+        "shift_y": {
+          "type": "number",
+          "description": "Vertical lens shift.",
+          "minimum": -10,
+          "maximum": 10
+        },
+        "clip_start": {
+          "type": "number",
+          "description": "Near clipping distance; must be less than clip_end.",
+          "minimum": 1e-06,
+          "maximum": 1000000
+        },
+        "clip_end": {
+          "type": "number",
+          "description": "Far clipping distance; must exceed clip_start.",
+          "minimum": 1e-06,
+          "maximum": 1000000
+        },
+        "object_names": {
+          "type": "array",
+          "description": "Exact names of objects to frame, including evaluated instances.",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "padding": {
+          "type": "number",
+          "description": "Framing margin multiplier from 1 to 10 (default 1.1).",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "make_active": {
+          "type": "boolean",
+          "description": "Make this the scene camera (default false)."
+        }
+      },
+      "required": [
+        "object_name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "set_viewport",
+    "description": "Inspect or change a 3D viewport. Omit settings to inspect its current state. Set view direction, projection, shading, overlays, gizmos, or zoom. Frame ALL visible objects, SELECTED visible objects, or exact object_names, including evaluated instances. Framing preserves selection and exits camera view; it cannot be combined with distance. Axis views default to orthographic and ISO to perspective. CAMERA uses the viewport camera and accepts camera_zoom for display zoom; use set_camera to change the actual camera lens or fit its composition. Requires a Blender window with a single-view 3D viewport.",
+    "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "viewport_index": {
+          "type": "integer",
+          "description": "3D viewport index across windows, current window first (default 0). Quad view is unsupported.",
+          "minimum": 0
+        },
+        "view": {
+          "type": "string",
+          "description": "View direction or camera view.",
+          "enum": [
+            "FRONT",
+            "BACK",
+            "LEFT",
+            "RIGHT",
+            "TOP",
+            "BOTTOM",
+            "ISO",
+            "CAMERA"
+          ]
+        },
+        "projection": {
+          "type": "string",
+          "description": "Viewport projection, incompatible with view=CAMERA.",
+          "enum": [
+            "PERSP",
+            "ORTHO"
+          ]
+        },
+        "frame": {
+          "type": "string",
+          "description": "Objects to frame; cannot be combined with object_names.",
+          "enum": [
+            "ALL",
+            "SELECTED"
+          ]
+        },
+        "object_names": {
+          "type": "array",
+          "description": "Exact names of objects to frame, including evaluated instances.",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "padding": {
+          "type": "number",
+          "description": "Framing margin multiplier from 1 to 10 (default 1.1).",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "distance": {
+          "type": "number",
+          "description": "Absolute distance from the viewport pivot; unavailable in camera view.",
+          "minimum": 1e-06,
+          "maximum": 1000000
+        },
+        "camera_zoom": {
+          "type": "number",
+          "description": "Blender camera-view display zoom from -30 to 600; 0 is the default. Does not change rendered composition.",
+          "minimum": -30,
+          "maximum": 600
+        },
+        "shading": {
+          "type": "string",
+          "description": "Viewport shading mode.",
+          "enum": [
+            "WIREFRAME",
+            "SOLID",
+            "MATERIAL",
+            "RENDERED"
+          ]
+        },
+        "overlays": {
+          "type": "boolean",
+          "description": "Show viewport overlays."
+        },
+        "gizmos": {
+          "type": "boolean",
+          "description": "Show viewport gizmos."
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "get_viewport_screenshot",
-    "description": "Capture the current 3D viewport as an image with dimensions and capture method. Requires a Blender window with a 3D viewport; unavailable in background mode. Use to verify visible results after a meaningful batch of changes. This shows the current view, not a final camera render; frame the relevant objects first if needed.",
+    "description": "Capture a 3D viewport as an image with dimensions, capture method, and viewport settings. Requires a Blender window with a single-view 3D viewport. Use set_viewport to frame objects and choose shading. With camera_only=true, capture the active scene camera frame using viewport shading and render pixel aspect; supports PERSP and ORTHO cameras. This is a viewport preview; use render jobs for final camera renders. Camera capture leaves the displayed view unchanged and requires offscreen capture; normal viewport capture can fall back to a window grab.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -82,6 +260,15 @@
           "default": 1000,
           "minimum": 1,
           "maximum": 4096
+        },
+        "viewport_index": {
+          "type": "integer",
+          "description": "3D viewport index across windows, current window first (default 0). Quad view is unsupported.",
+          "minimum": 0
+        },
+        "camera_only": {
+          "type": "boolean",
+          "description": "Capture only the active scene camera frame (default false)."
         }
       },
       "required": [],

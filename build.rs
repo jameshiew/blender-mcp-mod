@@ -110,6 +110,7 @@ fn main() {
             "geometry.py".into(),
             fs::read("extension/geometry.py").unwrap(),
         ),
+        ("view.py".into(), fs::read("extension/view.py").unwrap()),
         (
             "render_jobs.py".into(),
             fs::read("extension/render_jobs.py").unwrap(),

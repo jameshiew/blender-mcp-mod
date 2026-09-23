@@ -4,6 +4,7 @@ import os
 import socket
 import subprocess
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -253,6 +254,36 @@ bpy.context.view_layer.update()
             assert output["output_truncated"] is True
             assert len(output["result"]) == 16_384
             assert output["stderr"] == "warning\n"
+
+            camera = call("get_object_info", {"object_name": "Camera"})
+            assert camera["camera"]["projection"] == "PERSP"
+            configured = call(
+                "set_camera",
+                {
+                    "object_name": "Camera",
+                    "lens": 60,
+                    "object_names": ["Inspect.Child"],
+                },
+            )
+            assert configured["camera"]["lens"] == 60
+            framed = call(
+                "set_viewport",
+                {"view": "FRONT", "object_names": ["Inspect.Child"], "overlays": False},
+            )
+            assert framed["projection"] == "ORTHO"
+            assert framed["framed_objects"] == ["Inspect.Child"]
+            camera_image = client.call(
+                "get_viewport_screenshot", {"max_size": 128, "camera_only": True}
+            )
+            assert not camera_image.get("isError"), camera_image
+            assert camera_image["structuredContent"]["capture_mode"] == "CAMERA"
+            checks_path = Path(__file__).with_name("blender_view_checks.py")
+            call(
+                "execute_blender_code",
+                {
+                    "code": f"import runpy\nchecks = runpy.run_path({str(checks_path)!r})\nprint(checks['run_checks'](bpy.types.blendermcp_server, viewport=True))"
+                },
+            )
 
             screenshot = client.call("get_viewport_screenshot", {"max_size": 256})
             assert not screenshot.get("isError"), screenshot
