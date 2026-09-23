@@ -69,9 +69,8 @@ the extension manifest and packages its Python modules and locked wheels.
 
 ```sh
 just verify
-just verify-addon /Applications/Blender.app/Contents/MacOS/Blender
-BLENDER_TEST_EXECUTABLE=/Applications/Blender.app/Contents/MacOS/Blender just test
+just verify-native /Applications/Blender.app/Contents/MacOS/Blender
 ```
 
-The last command also runs the native Blender tests. Replace the executable
-path for your installation.
+The last command includes native Blender tests and requires a GUI display.
+Replace the executable path for your installation.

@@ -11,6 +11,9 @@ sync-wheels:
 verify-addon blender="blender":
     addon_package="$(cargo run --locked --quiet -- package-addon)" && "{{blender}}" --command extension validate "$addon_package"
 
+verify-native $blender:
+    BLENDER_TEST_EXECUTABLE="${blender:?Pass the path to the Blender executable}" just verify
+
 test:
     cargo test --locked
     uv run --locked pytest -q
