@@ -48,9 +48,9 @@ def run_checks(server, viewport=False):
         raise AssertionError(f"Expected validation failure: {options}")
 
     def corners(obj):
-        bounds = server.get_object_info(obj.name, evaluated=True)["evaluated"][
-            "world_bounding_box"
-        ]
+        bounds = server.handlers["get_object_info"](obj.name, evaluated=True)[
+            "evaluated"
+        ]["world_bounding_box"]
         return [Vector(point) for point in product(*zip(*bounds))]
 
     try:
@@ -95,7 +95,7 @@ def run_checks(server, viewport=False):
             ):
                 render.resolution_x, render.resolution_y = width, height
                 render.pixel_aspect_x, render.pixel_aspect_y = pixel_x, pixel_y
-                result = server.set_camera(
+                result = server.handlers["set_camera"](
                     object_name=camera.name,
                     projection=projection,
                     lens=65,
@@ -121,10 +121,10 @@ def run_checks(server, viewport=False):
                         and 0 <= projected.y <= 1
                         and projected.z > 0
                     ), (projection, width, height, projected[:], result)
-        inspected = server.get_object_info(camera.name)["camera"]
+        inspected = server.handlers["get_object_info"](camera.name)["camera"]
         assert inspected["sensor_fit"] == "AUTO" and inspected["is_active"]
         assert inspected["lens"] == 65 and inspected["dof"]["focus_object"] is None
-        before = server.get_object_info(camera.name)
+        before = server.handlers["get_object_info"](camera.name)
         for options in (
             {"lens": True},
             {"lens": 0},
@@ -134,15 +134,18 @@ def run_checks(server, viewport=False):
             {"object_names": [camera.name]},
             {"object_names": []},
         ):
-            failure(server.set_camera, object_name=camera.name, **options)
-            assert server.get_object_info(camera.name) == before
+            failure(server.handlers["set_camera"], object_name=camera.name, **options)
+            assert server.handlers["get_object_info"](camera.name) == before
         constraint = camera.constraints.new("COPY_LOCATION")
         failure(
-            server.set_camera, object_name=camera.name, object_names=targets, lens=30
+            server.handlers["set_camera"],
+            object_name=camera.name,
+            object_names=targets,
+            lens=30,
         )
         assert camera.data.lens == 65
         camera.constraints.remove(constraint)
-        server.set_camera(
+        server.handlers["set_camera"](
             object_name=camera.name,
             projection="PERSP",
             lens=40,
@@ -156,10 +159,10 @@ def run_checks(server, viewport=False):
             original_transform = camera.matrix_world.copy()
             space.lock_camera = True
             instancer.hide_set(True)
-            failure(server.set_viewport, object_names=targets)
+            failure(server.handlers["set_viewport"], object_names=targets)
             instancer.hide_set(False)
             for view in ("FRONT", "BACK", "LEFT", "RIGHT", "TOP", "BOTTOM", "ISO"):
-                result = server.set_viewport(
+                result = server.handlers["set_viewport"](
                     view=view,
                     object_names=targets,
                     shading="SOLID",
@@ -181,16 +184,24 @@ def run_checks(server, viewport=False):
                         and abs(clip.x / clip.w) < 1
                         and abs(clip.y / clip.w) < 1
                     ), (view, clip[:], result)
-            server.set_viewport(frame="ALL")
+            server.handlers["set_viewport"](frame="ALL")
             for selected_obj in bpy.context.selected_objects:
                 selected_obj.select_set(False)
             instancer.select_set(True)
-            assert server.set_viewport(frame="SELECTED")["framed_objects"] == targets
+            assert (
+                server.handlers["set_viewport"](frame="SELECTED")["framed_objects"]
+                == targets
+            )
             for shading in ("WIREFRAME", "SOLID", "MATERIAL", "RENDERED"):
-                assert server.set_viewport(shading=shading)["shading"] == shading
-            server.set_viewport(shading="SOLID", view="CAMERA", camera_zoom=15)
+                assert (
+                    server.handlers["set_viewport"](shading=shading)["shading"]
+                    == shading
+                )
+            server.handlers["set_viewport"](
+                shading="SOLID", view="CAMERA", camera_zoom=15
+            )
             assert camera.matrix_world == original_transform
-            state = server.set_viewport()
+            state = server.handlers["set_viewport"]()
             for options in (
                 {"viewport_index": 999},
                 {"camera_zoom": 601},
@@ -200,33 +211,37 @@ def run_checks(server, viewport=False):
                 {"view": "ISO", "object_names": ["Missing"]},
                 {"overlays": 1},
             ):
-                failure(server.set_viewport, **options)
-                assert server.set_viewport() == state
+                failure(server.handlers["set_viewport"], **options)
+                assert server.handlers["set_viewport"]() == state
             image_count = len(bpy.data.images)
-            capture = server.get_viewport_screenshot(max_size=256, camera_only=True)
+            capture = server.handlers["get_viewport_screenshot"](
+                max_size=256, camera_only=True
+            )
             assert capture.get("success"), capture
             assert (capture["width"], capture["height"]) == (192, 256), capture
             assert (
                 capture["capture_mode"] == "CAMERA" and capture["camera"] == camera.name
             )
             assert base64.b64decode(capture["image_data"]).startswith(b"\x89PNG")
-            assert server.set_viewport() == state
+            assert server.handlers["set_viewport"]() == state
             assert len(bpy.data.images) == image_count
             scene.camera = None
-            missing_camera = server.get_viewport_screenshot(camera_only=True)
+            missing_camera = server.handlers["get_viewport_screenshot"](
+                camera_only=True
+            )
             assert (
                 "error" in missing_camera
                 and "active PERSP or ORTHO" in missing_camera["error"]
             ), missing_camera
             scene.camera = camera
-            normal = server.get_viewport_screenshot(max_size=256)
+            normal = server.handlers["get_viewport_screenshot"](max_size=256)
             assert normal.get("success"), normal
             assert normal["capture_mode"] == "VIEWPORT"
             return {
                 "camera": inspected,
                 "capture": {k: v for k, v in capture.items() if k != "image_data"},
             }
-        failure(server.set_viewport)
+        failure(server.handlers["set_viewport"])
         return {"camera": inspected}
     finally:
         scene.camera = original_camera

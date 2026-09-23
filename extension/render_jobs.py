@@ -35,9 +35,8 @@ class RenderJobs:
     max_jobs = 8
 
     def __init__(self):
-        self._temporary = tempfile.TemporaryDirectory(prefix="blender-mcp-renders-")
+        self._temporary = None
         self._jobs = {}
-        atexit.register(self.close)
 
     @staticmethod
     def _integer(value, name, minimum, maximum):
@@ -119,6 +118,9 @@ class RenderJobs:
             raise RuntimeError("Blender executable path is unavailable")
 
         job_id = uuid.uuid4().hex
+        if self._temporary is None:
+            self._temporary = tempfile.TemporaryDirectory(prefix="blender-mcp-renders-")
+            atexit.register(self.close)
         directory = Path(self._temporary.name) / job_id
         directory.mkdir()
         try:
@@ -312,5 +314,7 @@ class RenderJobs:
                     job.process.kill()
                 job.process.wait(timeout=5)
         self._jobs.clear()
-        self._temporary.cleanup()
+        if self._temporary is not None:
+            self._temporary.cleanup()
+            self._temporary = None
         atexit.unregister(self.close)

@@ -2,7 +2,7 @@ from itertools import product
 from types import SimpleNamespace
 
 import pytest
-from extension_stub import _load_addon
+from addon_stub import _load_addon
 
 
 class Vector(list):
@@ -68,8 +68,9 @@ def scene_object(
     )
 
 
-def scene_server(monkeypatch, objects=()):
-    addon, bpy = _load_addon(monkeypatch)
+def load_scene(monkeypatch, objects=()):
+    addon = _load_addon(monkeypatch)
+    bpy = addon.scene.bpy
     bpy.context.scene = SimpleNamespace(
         name="Scene",
         objects=list(objects),
@@ -98,16 +99,16 @@ def scene_server(monkeypatch, objects=()):
             }
         ),
     )
-    addon.mathutils.Vector = Vector
-    return addon.BlenderMCPServer(), bpy
+    monkeypatch.setattr(addon.geometry, "Vector", Vector)
+    return addon.scene, bpy
 
 
 def test_scene_pagination_reaches_every_object_in_name_order(monkeypatch):
     names = [f"Object.{index:03}" for index in range(25)]
-    server, _ = scene_server(
+    scene_api, _ = load_scene(
         monkeypatch, [scene_object(name) for name in reversed(names)]
     )
-    first = server.get_scene_info()
+    first = scene_api.get_scene_info()
     assert [obj["name"] for obj in first["objects"]] == names[:20]
     assert first["object_count"] == first["matching_objects"] == 25
     assert first["returned_count"] == first["limit"] == 20
@@ -115,14 +116,14 @@ def test_scene_pagination_reaches_every_object_in_name_order(monkeypatch):
     assert first["next_offset"] == 20
     assert first["has_more"] is True
 
-    last = server.get_scene_info(offset=first["next_offset"])
+    last = scene_api.get_scene_info(offset=first["next_offset"])
     assert [obj["name"] for obj in last["objects"]] == names[20:]
     assert last["returned_count"] == 5
     assert last["matching_objects"] == 25
     assert last["next_offset"] is None
     assert last["has_more"] is False
 
-    past_end = server.get_scene_info(offset=100)
+    past_end = scene_api.get_scene_info(offset=100)
     assert past_end["objects"] == []
     assert past_end["returned_count"] == 0
     assert past_end["matching_objects"] == 25
@@ -132,7 +133,7 @@ def test_scene_pagination_reaches_every_object_in_name_order(monkeypatch):
 
 
 def test_filters_apply_before_pagination_and_keep_scene_count(monkeypatch):
-    server, _ = scene_server(
+    scene_api, _ = load_scene(
         monkeypatch,
         [
             scene_object("Lamp.Shade.B", selected=True),
@@ -148,17 +149,17 @@ def test_filters_apply_before_pagination_and_keep_scene_count(monkeypatch):
         "selected_only": True,
         "limit": 1,
     }
-    first = server.get_scene_info(**options)
+    first = scene_api.get_scene_info(**options)
     assert [obj["name"] for obj in first["objects"]] == ["Lamp.Shade.A"]
     assert first["object_count"] == 5
     assert first["matching_objects"] == 2
     assert first["next_offset"] == 1
     assert first["objects"][0]["selected"] is True
     assert first["objects"][0]["visible"] is False
-    last = server.get_scene_info(offset=first["next_offset"], **options)
+    last = scene_api.get_scene_info(offset=first["next_offset"], **options)
     assert [obj["name"] for obj in last["objects"]] == ["Lamp.Shade.B"]
     assert last["next_offset"] is None
-    missing = server.get_scene_info(name_filter="missing")
+    missing = scene_api.get_scene_info(name_filter="missing")
     assert missing["object_count"] == 5
     assert missing["matching_objects"] == missing["returned_count"] == 0
     assert missing["objects"] == []
@@ -168,11 +169,11 @@ def test_filters_apply_before_pagination_and_keep_scene_count(monkeypatch):
 def test_scene_reports_context_and_keeps_existing_location_precision(monkeypatch):
     obj = scene_object("Cube", location=(1.234, -2.345, 3.456), selected=True)
     camera = scene_object("Camera", object_type="CAMERA")
-    server, bpy = scene_server(monkeypatch, [obj, camera])
+    scene_api, bpy = load_scene(monkeypatch, [obj, camera])
     bpy.context.active_object = obj
     bpy.context.mode = "EDIT_MESH"
     bpy.context.scene.camera = camera
-    result = server.get_scene_info(name_filter="Cube")
+    result = scene_api.get_scene_info(name_filter="Cube")
     assert result["name"] == "Scene"
     assert result["materials_count"] == 1
     assert result["active_object"] == "Cube"
@@ -195,9 +196,9 @@ def test_scene_reports_context_and_keeps_existing_location_precision(monkeypatch
 
 
 def test_empty_unsaved_scene_has_nullable_context(monkeypatch):
-    server, bpy = scene_server(monkeypatch)
+    scene_api, bpy = load_scene(monkeypatch)
     bpy.data.filepath = ""
-    result = server.get_scene_info()
+    result = scene_api.get_scene_info()
     assert result["object_count"] == result["matching_objects"] == 0
     assert result["objects"] == []
     assert result["active_object"] is None
@@ -226,17 +227,17 @@ def test_empty_unsaved_scene_has_nullable_context(monkeypatch):
     ],
 )
 def test_scene_rejects_invalid_parameters_before_reading_scene(monkeypatch, options):
-    server, bpy = scene_server(monkeypatch)
+    scene_api, bpy = load_scene(monkeypatch)
     bpy.context = None
     bpy.data = None
-    result = server.get_scene_info(**options)
+    result = scene_api.get_scene_info(**options)
     assert "error" in result
     assert "NoneType" not in result["error"]
 
 
 def test_object_type_filter_uses_running_blender_enum(monkeypatch):
-    server, _ = scene_server(monkeypatch, [scene_object("Future", "NEW_TYPE")])
-    result = server.get_scene_info(object_type="NEW_TYPE")
+    scene_api, _ = load_scene(monkeypatch, [scene_object("Future", "NEW_TYPE")])
+    result = scene_api.get_scene_info(object_type="NEW_TYPE")
     assert [obj["name"] for obj in result["objects"]] == ["Future"]
 
 
@@ -257,8 +258,8 @@ def test_parented_object_distinguishes_local_and_world_transforms(monkeypatch):
             show_render=True,
         )
     ]
-    server, _ = scene_server(monkeypatch, [parent, child])
-    result = server.get_object_info("Child")
+    scene_api, _ = load_scene(monkeypatch, [parent, child])
+    result = scene_api.get_object_info("Child")
     assert result["location"] == [1, 2, 3]
     assert result["rotation"] == [0.1, 0.2, 0.3]
     assert result["scale"] == [1, 1, 1]
@@ -286,8 +287,8 @@ def test_parented_object_distinguishes_local_and_world_transforms(monkeypatch):
     assert result["materials"] == ["Material"]
     assert result["mesh"] == {"vertices": 8, "edges": 12, "polygons": 6}
     assert "evaluated" not in result
-    assert server.get_object_info("Child", evaluated=False) == result
-    parent_info = server.get_object_info("Parent")
+    assert scene_api.get_object_info("Child", evaluated=False) == result
+    parent_info = scene_api.get_object_info("Parent")
     assert parent_info["parent"] is None
     assert parent_info["modifiers"] == []
     assert "world_bounding_box" not in parent_info
@@ -296,29 +297,29 @@ def test_parented_object_distinguishes_local_and_world_transforms(monkeypatch):
 
 @pytest.mark.parametrize("name", ["", None, 42, []])
 def test_object_rejects_invalid_names_before_data_access(monkeypatch, name):
-    server, bpy = scene_server(monkeypatch)
+    scene_api, bpy = load_scene(monkeypatch)
     bpy.data = None
     with pytest.raises(ValueError, match="name must be a non-empty string"):
-        server.get_object_info(name)
+        scene_api.get_object_info(name)
 
 
 def test_object_reports_missing_name(monkeypatch):
-    server, _ = scene_server(monkeypatch)
+    scene_api, _ = load_scene(monkeypatch)
     with pytest.raises(ValueError, match="Object not found: Missing"):
-        server.get_object_info("Missing")
+        scene_api.get_object_info("Missing")
 
 
 @pytest.mark.parametrize("details", [None, 0, 1, "true", []])
 def test_object_rejects_invalid_details_before_data_access(monkeypatch, details):
-    server, bpy = scene_server(monkeypatch)
+    scene_api, bpy = load_scene(monkeypatch)
     bpy.data = None
     with pytest.raises(ValueError, match="details must be a boolean"):
-        server.get_object_info("Cube", details=details)
+        scene_api.get_object_info("Cube", details=details)
 
 
 @pytest.mark.parametrize("evaluated", [None, 0, 1, "true", []])
 def test_object_rejects_invalid_evaluated_before_data_access(monkeypatch, evaluated):
-    server, bpy = scene_server(monkeypatch)
+    scene_api, bpy = load_scene(monkeypatch)
     bpy.data = None
     with pytest.raises(ValueError, match="evaluated must be a boolean"):
-        server.get_object_info("Cube", evaluated=evaluated)
+        scene_api.get_object_info("Cube", evaluated=evaluated)

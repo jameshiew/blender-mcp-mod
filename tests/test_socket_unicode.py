@@ -23,7 +23,6 @@ import json
 import queue
 
 import pytest
-from test_server_threading import BlenderMCPServer
 
 
 class _ScriptedSocket:
@@ -51,8 +50,8 @@ class _ScriptedSocket:
         pass
 
 
-def _make_server():
-    server = BlenderMCPServer(port=0)
+def _make_server(server_class):
+    server = server_class(port=0)
     server.execute_command = lambda command: {"status": "success", "result": {}}
 
     class RespondingQueue(queue.Queue):
@@ -76,7 +75,7 @@ def _split_after_lead_byte(payload: bytes) -> int:
     raise AssertionError("payload has no multi-byte UTF-8 character to split")
 
 
-def test_split_multibyte_utf8_boundary_is_not_dropped():
+def test_split_multibyte_utf8_boundary_is_not_dropped(server_class):
     payload = json.dumps(
         {"type": "ping", "params": {"note": "café ☕ 日本語"}}, ensure_ascii=False
     ).encode("utf-8")
@@ -88,7 +87,7 @@ def test_split_multibyte_utf8_boundary_is_not_dropped():
     with pytest.raises(UnicodeDecodeError):
         chunk1.decode("utf-8")
 
-    server = _make_server()
+    server = _make_server(server_class)
     server.running = True
     server._handle_client(_ScriptedSocket([chunk1, chunk2]))
 
@@ -102,7 +101,7 @@ def test_split_multibyte_utf8_boundary_is_not_dropped():
     assert command["params"]["note"] == "café ☕ 日本語"
 
 
-def test_split_multibyte_utf8_boundary_keeps_handler_loop_alive():
+def test_split_multibyte_utf8_boundary_keeps_handler_loop_alive(server_class):
     """A second command sent right after the split payload must still arrive.
 
     If the split killed the loop, this second command would never be queued.
@@ -113,7 +112,7 @@ def test_split_multibyte_utf8_boundary_keeps_handler_loop_alive():
     split_idx = _split_after_lead_byte(first)
     second = json.dumps({"type": "ping", "params": {}}).encode("utf-8")
 
-    server = _make_server()
+    server = _make_server(server_class)
     server.running = True
     server._handle_client(
         _ScriptedSocket([first[:split_idx], first[split_idx:], second])

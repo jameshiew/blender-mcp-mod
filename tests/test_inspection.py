@@ -1,21 +1,16 @@
-import importlib.util
 import json
 from types import SimpleNamespace
 
 import pytest
-from conftest import ROOT_ADDON
-from extension_stub import _load_addon
+from addon_stub import _load_addon
 
 
 @pytest.fixture
 def inspection(monkeypatch):
-    _, bpy = _load_addon(monkeypatch)
+    addon = _load_addon(monkeypatch)
+    bpy = addon.server.bpy
     bpy.types.ID = type("ID", (), {})
-    spec = importlib.util.spec_from_file_location(
-        "inspection_test", ROOT_ADDON.with_name("inspection.py")
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = addon.inspection
     return module, bpy
 
 

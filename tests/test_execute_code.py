@@ -1,5 +1,4 @@
 import pytest
-from test_server_threading import BlenderMCPServer
 
 
 def execute(server, code, namespace="task-a", **options):
@@ -11,8 +10,8 @@ def execute(server, code, namespace="task-a", **options):
     )
 
 
-def test_imports_and_helpers_persist_across_commands():
-    server = BlenderMCPServer()
+def test_imports_and_helpers_persist_across_commands(server_class):
+    server = server_class()
     first = execute(
         server,
         "import math\nscale = 2\ndef measure(value):\n    return math.sqrt(value) * scale\nprint('defined')",
@@ -38,8 +37,8 @@ def test_imports_and_helpers_persist_across_commands():
     }
 
 
-def test_error_preserves_existing_and_partially_executed_state():
-    server = BlenderMCPServer()
+def test_error_preserves_existing_and_partially_executed_state(server_class):
+    server = server_class()
     execute(server, "values = [1]")
     result = execute(
         server,
@@ -60,9 +59,9 @@ def test_error_preserves_existing_and_partially_executed_state():
     assert execute(server, "print(values)")["result"]["result"] == "[1, 2]\n"
 
 
-def test_success_captures_stderr_separately():
+def test_success_captures_stderr_separately(server_class):
     result = execute(
-        BlenderMCPServer(),
+        server_class(),
         "import sys\nprint('result')\nprint('warning', file=sys.stderr)",
     )
     assert result == {
@@ -78,9 +77,9 @@ def test_success_captures_stderr_separately():
 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
-def test_output_is_bounded_during_write_and_writelines(stream):
+def test_output_is_bounded_during_write_and_writelines(server_class, stream):
     result = execute(
-        BlenderMCPServer(),
+        server_class(),
         f"import sys\noutput = sys.{stream}\n"
         "assert output.write('x' * 1_000_000) == 1_000_000\n"
         "assert len(output.getvalue()) == 16384\n"
@@ -94,8 +93,8 @@ def test_output_is_bounded_during_write_and_writelines(stream):
     )
 
 
-def test_exact_output_limit_is_not_reported_as_truncated():
-    result = execute(BlenderMCPServer(), "print('x' * 16384, end='')")
+def test_exact_output_limit_is_not_reported_as_truncated(server_class):
+    result = execute(server_class(), "print('x' * 16384, end='')")
     assert result == {
         "status": "success",
         "result": {
@@ -107,9 +106,9 @@ def test_exact_output_limit_is_not_reported_as_truncated():
     }
 
 
-def test_failure_includes_bounded_stdout_and_stderr():
+def test_failure_includes_bounded_stdout_and_stderr(server_class):
     result = execute(
-        BlenderMCPServer(),
+        server_class(),
         "import sys\nprint('x' * 1_000_000)\n"
         "print('y' * 1_000_000, file=sys.stderr)\nraise RuntimeError('failed')",
     )
@@ -123,8 +122,8 @@ def test_failure_includes_bounded_stdout_and_stderr():
     assert len(message) < 50_000
 
 
-def test_large_exception_message_is_bounded():
-    result = execute(BlenderMCPServer(), "raise ValueError('x' * 1_000_000)")
+def test_large_exception_message_is_bounded(server_class):
+    result = execute(server_class(), "raise ValueError('x' * 1_000_000)")
     assert result["status"] == "success"
     assert not result["result"]["succeeded"]
     assert "ValueError" in result["result"]["error_message"]
@@ -132,8 +131,8 @@ def test_large_exception_message_is_bounded():
     assert len(result["result"]["error_message"]) < 20_000
 
 
-def test_syntax_error_reports_script_line_without_executing_code():
-    server = BlenderMCPServer()
+def test_syntax_error_reports_script_line_without_executing_code(server_class):
+    server = server_class()
     execute(server, "value = 7")
     result = execute(server, "value = 9\nif True\n    print(value)")
     assert result["status"] == "success"
@@ -148,18 +147,30 @@ def test_syntax_error_reports_script_line_without_executing_code():
     assert execute(server, "print(value)")["result"]["result"] == "7\n"
 
 
-def test_new_server_has_an_independent_namespace():
-    first = BlenderMCPServer()
-    second = BlenderMCPServer()
-    first.execute_code("value = 42", namespace="task-a")
-    result = second.execute_code("print(value)", namespace="task-a")
+def test_new_server_has_an_independent_namespace(server_class):
+    first = server_class()
+    second = server_class()
+    first.execution.execute_code("value = 42", namespace="task-a")
+    result = second.execution.execute_code("print(value)", namespace="task-a")
     assert not result["succeeded"]
     assert "name 'value' is not defined" in result["error_message"]
-    assert first.execute_code("print(value)", namespace="task-a")["result"] == "42\n"
+    assert (
+        first.execution.execute_code("print(value)", namespace="task-a")["result"]
+        == "42\n"
+    )
 
 
-def test_deep_traceback_keeps_origin_from_an_earlier_namespace_command():
-    server = BlenderMCPServer()
+def test_stop_clears_execution_namespaces(server_class):
+    server = server_class()
+    execute(server, "value = 42")
+    server.stop()
+    result = execute(server, "print(value)")
+    assert not result["result"]["succeeded"]
+    assert "name 'value' is not defined" in result["result"]["error_message"]
+
+
+def test_deep_traceback_keeps_origin_from_an_earlier_namespace_command(server_class):
+    server = server_class()
     execute(
         server,
         "def leaf():\n    raise ValueError('deep failure')\ndef hop(depth):\n    if depth:\n        return hop(depth - 1)\n    return leaf()",
@@ -171,20 +182,21 @@ def test_deep_traceback_keeps_origin_from_an_earlier_namespace_command():
     assert "ValueError: deep failure" in result["result"]["error_message"]
 
 
-def test_unnamed_calls_use_fresh_globals():
-    server = BlenderMCPServer()
-    server.execute_code("value = 42")
-    result = server.execute_code("print(value)")
+def test_unnamed_calls_use_fresh_globals(server_class):
+    server = server_class()
+    server.execution.execute_code("value = 42")
+    result = server.execution.execute_code("print(value)")
     assert not result["succeeded"]
     assert "name 'value' is not defined" in result["error_message"]
     execute(server, "named_value = 7")
     assert (
-        server.execute_code("print('named_value' in globals())")["result"] == "False\n"
+        server.execution.execute_code("print('named_value' in globals())")["result"]
+        == "False\n"
     )
 
 
-def test_interleaved_namespaces_keep_separate_globals():
-    server = BlenderMCPServer()
+def test_interleaved_namespaces_keep_separate_globals(server_class):
+    server = server_class()
     execute(server, "value = 2\ndef helper():\n    return value", namespace="task-a")
     execute(server, "value = 9\ndef helper():\n    return value", namespace="task-b")
     assert (
@@ -197,8 +209,8 @@ def test_interleaved_namespaces_keep_separate_globals():
     )
 
 
-def test_reset_clears_only_the_selected_namespace():
-    server = BlenderMCPServer()
+def test_reset_clears_only_the_selected_namespace(server_class):
+    server = server_class()
     execute(server, "value = 2", namespace="task-a")
     execute(server, "value = 9", namespace="task-b")
     result = execute(
@@ -218,8 +230,8 @@ def test_reset_clears_only_the_selected_namespace():
 
 
 @pytest.mark.parametrize("namespace", ["", "a" * 129, 42, []])
-def test_invalid_namespace_is_rejected_before_execution(namespace):
-    server = BlenderMCPServer()
+def test_invalid_namespace_is_rejected_before_execution(server_class, namespace):
+    server = server_class()
     result = execute(server, "raise AssertionError('executed')", namespace=namespace)
     assert result == {
         "status": "error",
@@ -227,8 +239,8 @@ def test_invalid_namespace_is_rejected_before_execution(namespace):
     }
 
 
-def test_reset_requires_a_namespace():
-    result = execute(BlenderMCPServer(), "", namespace=None, reset_namespace=True)
+def test_reset_requires_a_namespace(server_class):
+    result = execute(server_class(), "", namespace=None, reset_namespace=True)
     assert result == {
         "status": "error",
         "message": "Code execution error: reset_namespace requires a namespace",

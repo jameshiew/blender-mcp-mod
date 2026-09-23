@@ -1,19 +1,14 @@
-import importlib.util
+import importlib
 import json
 
 import pytest
-from conftest import ROOT_ADDON
-from extension_stub import _load_addon
+from addon_stub import _load_addon
 
 
 @pytest.fixture
 def progress(monkeypatch, tmp_path):
-    _load_addon(monkeypatch)
-    spec = importlib.util.spec_from_file_location(
-        "render_worker_test", ROOT_ADDON.with_name("render_worker.py")
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    addon = _load_addon(monkeypatch)
+    module = importlib.import_module(addon.__name__ + ".render_worker")
     return module.RenderProgress(tmp_path), tmp_path
 
 

@@ -6,6 +6,7 @@ import json
 import os
 import ssl
 import subprocess
+import sys
 import tempfile
 import tomllib
 import zipfile
@@ -21,6 +22,39 @@ RELEASE_TUPLE = [
     int(part) for part in RELEASE_VERSION.split("+")[0].split("-")[0].split(".")
 ]
 PROTOCOL_VERSION = CARGO_PACKAGE["metadata"]["blender"]["protocol-version"]
+BLENDER_VERSION_MIN = tomllib.loads(
+    (ROOT_ADDON.parent / "blender_manifest.toml.in").read_text()
+)["blender_version_min"]
+BLENDER_VERSION = tuple(int(part) for part in BLENDER_VERSION_MIN.split("."))
+
+
+@pytest.fixture(autouse=True)
+def isolated_addon_packages():
+    from addon_stub import loaded_packages
+
+    original = sys.modules.copy()
+    yield
+    for name in list(sys.modules):
+        if any(
+            name == package or name.startswith(package + ".")
+            for package in loaded_packages
+        ):
+            sys.modules.pop(name, None)
+            if name in original:
+                sys.modules[name] = original[name]
+    loaded_packages.clear()
+
+
+@pytest.fixture
+def addon(monkeypatch):
+    from addon_stub import _load_addon
+
+    return _load_addon(monkeypatch)
+
+
+@pytest.fixture
+def server_class(addon):
+    return addon.server.BlenderMCPServer
 
 
 @pytest.fixture(scope="session")

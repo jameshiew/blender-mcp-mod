@@ -1,93 +1,36 @@
-"""Tests for the addon's socket server threading model (no Blender required).
-
-The extension cannot be imported without bpy, so BlenderMCPServer is lifted out by
-AST and executed against stubs.
-
-The bug these cover: commands used to be dispatched by calling
-bpy.app.timers.register() from a client thread. bpy.app.timers is main-thread
-only, so on Windows the callback could be silently dropped - the connection was
-accepted but no response ever arrived, and the client hung until its 180s
-socket timeout.
-"""
-
 from __future__ import annotations
 
-import ast
 import json
-import logging
 import os
 import socket
 import threading
 import time
-import types
 from pathlib import Path
 
-from conftest import ROOT_ADDON, client_tls_context
+import pytest
+from conftest import client_tls_context
 
 
-def _load_server_class():
-    """Compile BlenderMCPServer against stub modules."""
-    source = ROOT_ADDON.read_text(encoding="utf-8")
-    tree = ast.parse(source)
-
-    body = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "BlenderMCPServer"
-    ]
-    assert body, "BlenderMCPServer not found in extension"
-
+@pytest.fixture(autouse=True)
+def timers(addon, monkeypatch):
     main_thread = threading.current_thread()
-    registered = {}
+    registered = set()
 
-    class _Timers:
-        """Stub that enforces the real bpy.app.timers main-thread constraint."""
-
+    class Timers:
         def register(self, fn, first_interval=0.0, persistent=False):
-            if threading.current_thread() is not main_thread:
-                raise AssertionError(
-                    "bpy.app.timers.register() called from a non-main thread"
-                )
-            registered[fn] = True
+            assert threading.current_thread() is main_thread, (
+                "timer registered off main thread"
+            )
+            registered.add(fn)
 
         def unregister(self, fn):
-            registered.pop(fn, None)
+            registered.discard(fn)
 
         def is_registered(self, fn):
             return fn in registered
 
-    bpy = types.ModuleType("bpy")
-    bpy.app = types.SimpleNamespace(background=False, timers=_Timers())
-    bpy.context = types.SimpleNamespace(
-        scene=types.SimpleNamespace(
-            blendermcp_use_sketchfab=False,
-        )
-    )
-
-    namespace = {
-        "bpy": bpy,
-        "socket": socket,
-        "ssl": __import__("ssl"),
-        "stat": __import__("stat"),
-        "Path": Path,
-        "tempfile": __import__("tempfile"),
-        "threading": threading,
-        "json": json,
-        "logger": logging.getLogger(__name__),
-        "time": time,
-        "queue": __import__("queue"),
-        "traceback": __import__("traceback"),
-        "os": __import__("os"),
-        "io": __import__("io"),
-        "redirect_stdout": __import__("contextlib").redirect_stdout,
-        "suppress": __import__("contextlib").suppress,
-        "get_blendermcp_addon_preferences": lambda context=None: None,
-    }
-    exec(compile(ast.Module(body=body, type_ignores=[]), "<addon>", "exec"), namespace)  # noqa: S102
-    return namespace["BlenderMCPServer"], registered
-
-
-BlenderMCPServer, _registered = _load_server_class()
+    monkeypatch.setattr(addon.transport.bpy.app, "timers", Timers())
+    return registered
 
 
 def _connect(port):
@@ -104,8 +47,8 @@ def _free_port():
         return s.getsockname()[1]
 
 
-def _make_server():
-    server = BlenderMCPServer(port=_free_port())
+def _make_server(server_class):
+    server = server_class(port=_free_port())
     # Stub out command execution; these tests are about transport, not bpy.
     server.execute_command = lambda command: {
         "status": "success",
@@ -122,13 +65,9 @@ def _pump(server, deadline=3.0):
         time.sleep(0.01)
 
 
-def test_client_thread_never_registers_a_timer():
-    """The regression itself: dispatch must not touch bpy.app.timers off-thread.
-
-    The _Timers stub raises if register() is called from a non-main thread, so
-    the old per-command bpy.app.timers.register() would surface here.
-    """
-    server = _make_server()
+def test_client_thread_never_registers_a_timer(server_class):
+    """The timer stub rejects registration from a client thread."""
+    server = _make_server(server_class)
     server.start()
     try:
         with _connect(server.port) as client:
@@ -146,9 +85,9 @@ def test_client_thread_never_registers_a_timer():
         server.stop()
 
 
-def test_command_is_queued_not_executed_on_client_thread():
+def test_command_is_queued_not_executed_on_client_thread(server_class):
     """Without a main-loop pump, the command waits in the queue - never lost."""
-    server = _make_server()
+    server = _make_server(server_class)
     server.start()
     try:
         with _connect(server.port) as client:
@@ -170,13 +109,13 @@ def test_command_is_queued_not_executed_on_client_thread():
         server.stop()
 
 
-def test_stop_releases_client_threads():
+def test_stop_releases_client_threads(server_class, timers):
     """stop() must unblock handlers so they cannot outlive a restart.
 
     Orphaned daemon threads parked in recv() were what produced the
     WinError 10054 after toggling the addon.
     """
-    server = _make_server()
+    server = _make_server(server_class)
     server.start()
 
     client = _connect(server.port)
@@ -204,7 +143,7 @@ def test_stop_releases_client_threads():
         with server._clients_lock:
             assert not server._clients, "client sockets still tracked after stop()"
 
-        assert not bpy_timer_registered(server), "drain timer left registered"
+        assert server._drain_command_queue not in timers, "drain timer left registered"
     finally:
         try:
             client.close()
@@ -212,22 +151,18 @@ def test_stop_releases_client_threads():
             pass
 
 
-def bpy_timer_registered(server):
-    return server._drain_command_queue in _registered
-
-
-def test_restart_rebinds_port_cleanly():
+def test_restart_rebinds_port_cleanly(server_class):
     """A stopped server must fully release the port for the next start()."""
     port = _free_port()
 
-    first = BlenderMCPServer(port=port)
+    first = server_class(port=port)
     first.execute_command = lambda command: {"status": "success", "result": {}}
     first.start()
     with _connect(port):
         pass
     first.stop()
 
-    second = BlenderMCPServer(port=port)
+    second = server_class(port=port)
     second.execute_command = lambda command: {
         "status": "success",
         "result": {"echo": command.get("type")},

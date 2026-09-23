@@ -116,8 +116,8 @@ def run_checks(server):
         scene.collection.objects.link(camera)
         camera_data.keyframe_insert("lens", frame=7)
 
-        basic = server.get_object_info(obj.name)
-        detailed = server.get_object_info(obj.name, details=True)
+        basic = server.handlers["get_object_info"](obj.name)
+        detailed = server.handlers["get_object_info"](obj.name, details=True)
         assert "details" not in basic
         assert {
             key: value for key, value in detailed.items() if key != "details"
@@ -125,7 +125,7 @@ def run_checks(server):
         slots = detailed["details"]["material_slots"]
         assert slots["count"] == 2 and slots["items"][1]["material"] is None
         assert slots["items"][0]["material"]["name"] == material.name
-        settings = server.get_modifier_info(
+        settings = server.handlers["get_modifier_info"](
             object_name=obj.name, modifier_name="Copies"
         )["settings"]["values"]
         assert settings["count"] == 7 and settings["relative_offset_displace"] == [
@@ -134,7 +134,7 @@ def run_checks(server):
             0,
         ]
         assert settings["offset_object"]["name"] == target.name
-        inputs = server.get_modifier_info(
+        inputs = server.handlers["get_modifier_info"](
             object_name=obj.name, modifier_name="Procedural"
         )["inputs"]["items"]
         height = next(item for item in inputs if item["name"] == "Height")
@@ -143,7 +143,7 @@ def run_checks(server):
             and height.get("type", "ATTRIBUTE") == "ATTRIBUTE"
             and height["attribute_name"] == "height"
         )
-        material_result = server.get_material_info(
+        material_result = server.handlers["get_material_info"](
             material_name=material.name, limit=100
         )
         nodes = {
@@ -165,7 +165,7 @@ def run_checks(server):
         )
         offset, names = 0, []
         while offset is not None:
-            page = server.get_material_info(
+            page = server.handlers["get_material_info"](
                 material_name=material.name, offset=offset, limit=2
             )["node_tree"]["nodes"]
             names.extend(node["name"] for node in page["items"])
@@ -173,7 +173,7 @@ def run_checks(server):
             assert "truncated" not in page
             offset = page["next_offset"]
         assert names == sorted(nodes)
-        node_group = server.get_node_group_info(node_group_name=group.name)
+        node_group = server.handlers["get_node_group_info"](node_group_name=group.name)
         assert node_group["interface"]["items"][0]["name"] == "Factor"
         assert (
             abs(
@@ -182,7 +182,7 @@ def run_checks(server):
             )
             < 1e-6
         )
-        result = server.get_animation_info(data_name=obj.name, limit=100)
+        result = server.handlers["get_animation_info"](data_name=obj.name, limit=100)
         entries = result["entries"]["items"]
         channels = [entry for entry in entries if entry["kind"] == "ACTION_CHANNEL"]
         assert len(channels) == 1 and channels[0]["data_path"] == "location", result
@@ -208,13 +208,15 @@ def run_checks(server):
             for entry in entries
             if entry["kind"] == "NLA_ACTION_CHANNEL"
         )
-        other = server.get_animation_info(data_name=target.name)["entries"]["items"]
+        other = server.handlers["get_animation_info"](data_name=target.name)["entries"][
+            "items"
+        ]
         assert len(other) == 1 and other[0]["data_path"] == "scale"
         assert other[0]["sample_count"] == 12 and other[0]["keyframe_count"] == 0, other
         assert other[0]["frame_range"] == [9, 20]
         pages, offset = [], 0
         while offset is not None:
-            page = server.get_animation_info(
+            page = server.handlers["get_animation_info"](
                 data_name=obj.name, offset=offset, limit=2
             )["entries"]
             pages.extend(page["items"])
@@ -223,24 +225,24 @@ def run_checks(server):
             offset = page["next_offset"]
         assert pages == entries
         assert (
-            server.get_animation_info(data_name=obj.name, data_type="SHAPE_KEYS")[
-                "counts"
-            ]["ACTION_CHANNEL"]
+            server.handlers["get_animation_info"](
+                data_name=obj.name, data_type="SHAPE_KEYS"
+            )["counts"]["ACTION_CHANNEL"]
             == 1
         )
         assert (
-            server.get_animation_info(data_name=camera.name, data_type="OBJECT_DATA")[
-                "entries"
-            ]["items"][0]["data_path"]
+            server.handlers["get_animation_info"](
+                data_name=camera.name, data_type="OBJECT_DATA"
+            )["entries"]["items"][0]["data_path"]
             == "lens"
         )
         assert (
-            server.get_animation_info(data_name=material.name, data_type="MATERIAL")[
-                "entry_count"
-            ]
+            server.handlers["get_animation_info"](
+                data_name=material.name, data_type="MATERIAL"
+            )["entry_count"]
             == 0
         )
-        shader_anim = server.get_animation_info(
+        shader_anim = server.handlers["get_animation_info"](
             data_name=material.name, data_type="MATERIAL_NODES"
         )
         assert shader_anim["counts"]["ACTION_CHANNEL"] == 1
@@ -248,9 +250,9 @@ def run_checks(server):
             ".default_value"
         )
         assert (
-            server.get_animation_info(data_name=group.name, data_type="NODE_GROUP")[
-                "entry_count"
-            ]
+            server.handlers["get_animation_info"](
+                data_name=group.name, data_type="NODE_GROUP"
+            )["entry_count"]
             == 0
         )
         json.dumps([detailed, material_result, node_group, result], allow_nan=False)

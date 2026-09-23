@@ -18,7 +18,7 @@ def run_checks(server):
     original_data = [set(group) for group in data_groups]
 
     def inspect(obj):
-        return server.get_object_info(obj.name, evaluated=True)["evaluated"]
+        return server.handlers["get_object_info"](obj.name, evaluated=True)["evaluated"]
 
     def cube(name, collection):
         mesh = bpy.data.meshes.new(name)
@@ -68,7 +68,7 @@ def run_checks(server):
         obj = cube("GeometryCheck.Array", collection)
         array = obj.modifiers.new("Array", "ARRAY")
         array.count = 2
-        base = server.get_object_info(obj.name)
+        base = server.handlers["get_object_info"](obj.name)
         assert base["mesh"] == {"vertices": 8, "edges": 12, "polygons": 6}, base
         assert "evaluated" not in base
         result = inspect(obj)
@@ -107,7 +107,7 @@ def run_checks(server):
         )
         unrelated = instance("GeometryCheck.Unrelated", source, collection)
         unrelated.location = (100, 100, 100)
-        outer_info = server.get_object_info(outer.name, evaluated=True)
+        outer_info = server.handlers["get_object_info"](outer.name, evaluated=True)
         assert outer_info["dimensions"] == [0, 0, 0], outer_info
         instanced = outer_info["evaluated"]
         assert instanced["mesh"] is None, instanced

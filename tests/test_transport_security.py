@@ -9,14 +9,14 @@ import time
 import pytest
 from conftest import client_tls_context, create_credentials
 from test_rust_server import Client
-from test_server_threading import BlenderMCPServer, _connect, _free_port
+from test_server_threading import _connect, _free_port
 
 logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
-def server():
-    server = BlenderMCPServer(port=_free_port())
+def server(server_class):
+    server = server_class(port=_free_port())
     server.start()
     assert server.running, server.last_error
     try:
@@ -150,13 +150,15 @@ def test_stop_closes_an_incomplete_handshake(server):
         assert stalled.recv(1) == b""
 
 
-def test_missing_and_corrupt_credentials_never_open_the_port(binary, tmp_path):
+def test_missing_and_corrupt_credentials_never_open_the_port(
+    server_class, binary, tmp_path
+):
     directory = tmp_path / "pairing"
     for corrupt in (False, True):
         if corrupt:
             create_credentials(binary, directory)
             (directory / "credentials.json").write_bytes(b"\xffcorrupt")
-        candidate = BlenderMCPServer(port=_free_port(), config_dir=directory)
+        candidate = server_class(port=_free_port(), config_dir=directory)
         candidate.start()
         assert not candidate.running
         assert candidate.socket is None
@@ -174,7 +176,7 @@ def test_missing_and_corrupt_credentials_never_open_the_port(binary, tmp_path):
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permissions")
 @pytest.mark.parametrize("target", ["directory", "file", "symlink"])
-def test_unsafe_credential_storage_is_rejected(binary, tmp_path, target):
+def test_unsafe_credential_storage_is_rejected(server_class, binary, tmp_path, target):
     directory = create_credentials(binary, tmp_path / "pairing")
     path = directory / "credentials.json"
     if target == "directory":
@@ -185,7 +187,7 @@ def test_unsafe_credential_storage_is_rejected(binary, tmp_path, target):
         original = directory / "original.json"
         path.rename(original)
         path.symlink_to(original)
-    candidate = BlenderMCPServer(port=_free_port(), config_dir=directory)
+    candidate = server_class(port=_free_port(), config_dir=directory)
     candidate.start()
     assert not candidate.running
     assert candidate.socket is None
@@ -206,7 +208,7 @@ def test_rust_client_executes_unsandboxed_python_through_real_handler(
         monkeypatch.delenv("BLENDER_MCP_SAFE_MODE", raising=False)
     else:
         monkeypatch.setenv("BLENDER_MCP_SAFE_MODE", legacy_setting)
-    client = Client(binary, tmp_path, server=server)
+    client = Client(binary, tmp_path, type(server), server=server)
     marker = tmp_path / "python-created.txt"
     results = []
     errors = []

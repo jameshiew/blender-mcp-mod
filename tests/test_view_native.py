@@ -23,7 +23,7 @@ module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 checks = runpy.run_path({str(Path(__file__).with_name("blender_view_checks.py"))!r})
-print('CAMERA_CHECKS_OK', checks['run_checks'](module.BlenderMCPServer()))
+print('CAMERA_CHECKS_OK', checks['run_checks'](module.server.BlenderMCPServer()))
 """)
     checked = subprocess.run(
         [

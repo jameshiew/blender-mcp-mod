@@ -5,6 +5,7 @@ import bpy
 
 
 def run_checks(server, directory):
+    server = server.execution
     directory = Path(directory)
     original = directory / "original.blend"
     bpy.ops.mesh.primitive_cube_add()

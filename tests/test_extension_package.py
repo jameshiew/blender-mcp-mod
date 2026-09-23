@@ -1,6 +1,5 @@
 import ast
 import hashlib
-import importlib.util
 import json
 import os
 import shutil
@@ -12,7 +11,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from addon_stub import _install_bpy_stubs, load_addon_package
 from conftest import (
+    BLENDER_VERSION,
+    BLENDER_VERSION_MIN,
     PROTOCOL_VERSION,
     RELEASE_TUPLE,
     RELEASE_VERSION,
@@ -20,7 +22,6 @@ from conftest import (
     ROOT_ADDON,
     blender_environment,
 )
-from extension_stub import _install_bpy_stubs, _load_addon
 
 
 def test_package_metadata_and_wheels(addon_package):
@@ -53,21 +54,21 @@ def test_package_metadata_and_wheels(addon_package):
         assert archive.testzip() is None
         manifest = tomllib.loads(archive.read("blender_manifest.toml").decode())
         assert manifest["version"] == RELEASE_VERSION
-        assert manifest["blender_version_min"] == "5.2.0"
+        assert manifest["blender_version_min"] == BLENDER_VERSION_MIN
         assert manifest["license"] == ["SPDX:MIT"]
         assert set(manifest["permissions"]) == {"network", "files"}
         assert json.loads(archive.read("protocol.json"))["version"] == PROTOCOL_VERSION
         assert archive.read("LICENSE") == (REPO_ROOT / "LICENSE").read_bytes()
-        assert archive.read("__init__.py") == ROOT_ADDON.read_bytes()
-        for filename in (
-            "geometry.py",
-            "inspection.py",
-            "view.py",
-            "recovery.py",
-            "render_jobs.py",
-            "render_worker.py",
-        ):
-            assert archive.read(filename) == (ROOT_ADDON.parent / filename).read_bytes()
+        sources = {
+            path.relative_to(ROOT_ADDON.parent).as_posix(): path.read_bytes()
+            for path in ROOT_ADDON.parent.rglob("*.py")
+            if not any(
+                part.startswith(".") or part in {"__pycache__", "wheels"}
+                for part in path.relative_to(ROOT_ADDON.parent).parts
+            )
+        }
+        for name, source in sources.items():
+            assert archive.read(name) == source
         for removed in (
             "telemetry",
             "trajectory",
@@ -80,19 +81,13 @@ def test_package_metadata_and_wheels(addon_package):
             "hunyuan",
             "bit.ly",
         ):
-            assert removed not in archive.read("__init__.py").decode()
+            assert all(removed not in source.decode() for source in sources.values())
         assert set(archive.namelist()) == {
-            "__init__.py",
-            "geometry.py",
-            "inspection.py",
-            "view.py",
-            "recovery.py",
-            "render_jobs.py",
-            "render_worker.py",
             "blender_manifest.toml",
             "protocol.json",
             "LICENSE",
-        } | {name for name, _ in expected.values()}
+        } | sources.keys() | {name for name, _ in expected.values()}
+        assert archive.namelist() == sorted(archive.namelist())
         assert set(manifest["wheels"]) == {"./" + name for name, _ in expected.values()}
         for name, checksum in expected.values():
             assert (
@@ -103,16 +98,14 @@ def test_package_metadata_and_wheels(addon_package):
 def test_installed_namespace_preferences_and_handshake(unpacked_addon, monkeypatch):
     bpy = _install_bpy_stubs(monkeypatch, SimpleNamespace())
     name = "bl_ext.custom_repository.blender_mcp"
-    spec = importlib.util.spec_from_file_location(name, unpacked_addon / "__init__.py")
-    addon = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(addon)
+    addon = load_addon_package(monkeypatch, unpacked_addon / "__init__.py", name)
     preferences = object()
     bpy.context.preferences = SimpleNamespace(
         addons={name: SimpleNamespace(preferences=preferences)}
     )
-    assert addon.BLENDERMCP_AddonPreferences.bl_idname == name
-    assert addon.get_blendermcp_addon_preferences() is preferences
-    info = addon.BlenderMCPServer().get_addon_info()
+    assert addon.ui.BLENDERMCP_AddonPreferences.bl_idname == name
+    assert addon.preferences.get_preferences() is preferences
+    info = addon.server.BlenderMCPServer().get_addon_info()
     assert info["addon_build_version"] == RELEASE_VERSION
     assert info["addon_version"] == RELEASE_TUPLE
     assert info["protocol_version"] == PROTOCOL_VERSION
@@ -123,27 +116,29 @@ def test_running_extension_keeps_loaded_version(unpacked_addon, tmp_path, monkey
     _install_bpy_stubs(monkeypatch, SimpleNamespace())
     directory = tmp_path / "extension"
     shutil.copytree(unpacked_addon, directory)
-    spec = importlib.util.spec_from_file_location(
-        "bl_ext.test.blender_mcp", directory / "__init__.py"
+    addon = load_addon_package(
+        monkeypatch, directory / "__init__.py", "bl_ext.test.blender_mcp"
     )
-    addon = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(addon)
-    addon._addon_metadata()
+    addon.metadata.addon_metadata()
     manifest = directory / "blender_manifest.toml"
     manifest.write_text(manifest.read_text().replace(RELEASE_VERSION, "99.0.0+mod"))
     (directory / "protocol.json").write_text('{"version":999}')
-    info = addon.BlenderMCPServer().get_addon_info()
+    info = addon.server.BlenderMCPServer().get_addon_info()
     assert info["addon_build_version"] == RELEASE_VERSION
     assert info["protocol_version"] == PROTOCOL_VERSION
 
 
 def test_http_respects_online_access(monkeypatch):
-    addon, bpy = _load_addon(monkeypatch)
+    bpy = _install_bpy_stubs(monkeypatch)
+    addon = load_addon_package(monkeypatch)
     calls = []
     monkeypatch.setattr(
-        addon.requests, "get", lambda *a, **kw: calls.append((a, kw)), raising=False
+        addon.sketchfab.requests,
+        "get",
+        lambda *a, **kw: calls.append((a, kw)),
+        raising=False,
     )
-    request = addon._http_get
+    request = addon.sketchfab._http_get
     bpy.app.online_access = False
     with pytest.raises(RuntimeError, match="Online access is disabled"):
         request("https://example.invalid")
@@ -158,7 +153,7 @@ def test_http_respects_online_access(monkeypatch):
 
 
 def test_provider_requests_use_online_access_guard():
-    tree = ast.parse(ROOT_ADDON.read_text())
+    tree = ast.parse((ROOT_ADDON.parent / "sketchfab.py").read_text())
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in {
             "_http_get",
@@ -242,17 +237,17 @@ for module in list(sys.modules):
 name = "bl_ext.user_default.blender_mcp"
 addon_utils.enable(name, default_set=True)
 addon = sys.modules[name]
-assert addon.get_blendermcp_addon_preferences() is not None
-assert addon.BLENDERMCP_AddonPreferences.bl_idname == name
-info = addon.BlenderMCPServer().get_addon_info()
+assert addon.preferences.get_preferences() is not None
+assert addon.ui.BLENDERMCP_AddonPreferences.bl_idname == name
+info = addon.server.BlenderMCPServer().get_addon_info()
 assert info["addon_build_version"] == {RELEASE_VERSION!r}, info
 assert info["addon_version"] == {RELEASE_TUPLE!r}, info
 assert info["protocol_version"] == {PROTOCOL_VERSION!r}, info
-assert bpy.app.version >= (5, 2, 0)
-assert Path(addon.requests.__file__).resolve().is_relative_to(Path({str(tmp_path)!r}).resolve()), addon.requests.__file__
+assert bpy.app.version >= {BLENDER_VERSION!r}
+assert Path(addon.sketchfab.requests.__file__).resolve().is_relative_to(Path({str(tmp_path)!r}).resolve()), addon.sketchfab.requests.__file__
 assert not bpy.app.online_access
 try:
-    addon._http_get("https://example.invalid")
+    addon.sketchfab._http_get("https://example.invalid")
 except RuntimeError as error:
     assert "Online access is disabled" in str(error)
 else:
@@ -261,7 +256,7 @@ else:
 addon_utils.disable(name, default_set=True)
 assert not hasattr(bpy.types.Scene, "blendermcp_port")
 addon_utils.enable(name, default_set=True)
-assert addon.get_blendermcp_addon_preferences() is not None
+assert addon.preferences.get_preferences() is not None
 addon_utils.disable(name, default_set=True)
 print("EXTENSION_OK", bpy.app.version_string)
 """)

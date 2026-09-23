@@ -1,24 +1,19 @@
-import importlib.util
 import sys
 from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
-from conftest import ROOT_ADDON
-from extension_stub import _load_addon
+from addon_stub import _load_addon
 from test_scene_info import Vector
 
 
 @pytest.fixture
 def view(monkeypatch):
-    addon, bpy = _load_addon(monkeypatch)
-    addon.mathutils.Vector = Vector
-    monkeypatch.setitem(sys.modules, "blender_mcp_addon_test", addon)
-    spec = importlib.util.spec_from_file_location(
-        "blender_mcp_addon_test.view", ROOT_ADDON.with_name("view.py")
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    addon = _load_addon(monkeypatch)
+    bpy = addon.server.bpy
+    module = addon.view
+    monkeypatch.setattr(module, "Vector", Vector)
+    monkeypatch.setattr(addon.geometry, "Vector", Vector)
     return module, bpy
 
 

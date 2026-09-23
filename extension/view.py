@@ -1,10 +1,16 @@
+import base64
+import logging
 import math
+import os
+import tempfile
 from itertools import product
 
 import bpy
 from mathutils import Vector
 
 from .geometry import evaluated_geometry
+
+logger = logging.getLogger(__name__)
 
 
 def _number(name, value, low, high):
@@ -439,3 +445,50 @@ def capture_viewport(max_size, filepath, format, viewport_index=0, camera_only=F
             "camera": camera.name if camera else None,
             "viewport": viewport_info(area, viewport_index),
         }
+
+
+def get_viewport_screenshot(
+    max_size=800,
+    filepath=None,
+    format="png",
+    viewport_index=0,
+    camera_only=False,
+):
+    if type(max_size) is not int or not 1 <= max_size <= 4096:
+        return {"error": "max_size must be an integer between 1 and 4096"}
+    if type(viewport_index) is not int or viewport_index < 0:
+        return {"error": "viewport_index must be a non-negative integer"}
+    if type(camera_only) is not bool:
+        return {"error": "camera_only must be a boolean"}
+    options = (
+        {"viewport_index": viewport_index, "camera_only": camera_only}
+        if viewport_index or camera_only
+        else {}
+    )
+    if filepath:
+        return _save_viewport_screenshot(max_size, filepath, format, **options)
+    with tempfile.TemporaryDirectory(prefix="blender_mcp_") as directory:
+        path = os.path.join(directory, "viewport.png")
+        result = _save_viewport_screenshot(max_size, path, "png", **options)
+        if result.get("success"):
+            with open(path, "rb") as image:
+                result["image_data"] = base64.b64encode(image.read()).decode("ascii")
+            result["format"] = "png"
+            result.pop("filepath", None)
+        return result
+
+
+def _save_viewport_screenshot(
+    max_size=800,
+    filepath=None,
+    format="png",
+    viewport_index=0,
+    camera_only=False,
+):
+    try:
+        if not filepath:
+            return {"error": "No filepath provided"}
+        return capture_viewport(max_size, filepath, format, viewport_index, camera_only)
+    except Exception as error:
+        logger.exception("Error saving viewport screenshot")
+        return {"error": str(error)}

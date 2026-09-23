@@ -1,21 +1,16 @@
-import importlib.util
 from types import SimpleNamespace
 
 import pytest
-from conftest import ROOT_ADDON
-from extension_stub import _load_addon
+from addon_stub import _load_addon
 from test_scene_info import Matrix, Vector
 
 
 @pytest.fixture
 def geometry(monkeypatch):
-    addon, bpy = _load_addon(monkeypatch)
-    addon.mathutils.Vector = Vector
-    spec = importlib.util.spec_from_file_location(
-        "geometry_test", ROOT_ADDON.with_name("geometry.py")
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    addon = _load_addon(monkeypatch)
+    bpy = addon.server.bpy
+    module = addon.geometry
+    monkeypatch.setattr(module, "Vector", Vector)
     return module, bpy
 
 

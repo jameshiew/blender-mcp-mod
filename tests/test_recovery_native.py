@@ -23,7 +23,7 @@ module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 checks = runpy.run_path({str(Path(__file__).with_name("blender_recovery_checks.py"))!r})
-print('RECOVERY_CHECKS_OK', checks['run_checks'](module.BlenderMCPServer(config_dir={str(tmp_path)!r}), {str(tmp_path)!r}))
+print('RECOVERY_CHECKS_OK', checks['run_checks'](module.server.BlenderMCPServer(config_dir={str(tmp_path)!r}), {str(tmp_path)!r}))
 """)
     checked = subprocess.run(
         [

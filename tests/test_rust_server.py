@@ -1,4 +1,5 @@
 import base64
+import importlib
 import json
 import logging
 import os
@@ -9,13 +10,12 @@ import threading
 
 import pytest
 from conftest import PROTOCOL_VERSION, RELEASE_TUPLE, RELEASE_VERSION, ROOT_ADDON
-from test_server_threading import BlenderMCPServer
 
 logger = logging.getLogger(__name__)
 
 
 class Client:
-    def __init__(self, binary, directory, server=None):
+    def __init__(self, binary, directory, server_class, server=None):
         self.commands = []
         self.errors = queue.Queue()
         self.responses = queue.Queue()
@@ -24,8 +24,11 @@ class Client:
         self.listener.bind(("127.0.0.1", 0))
         self.listener.listen()
         self.listener.settimeout(0.1)
-        self.executor = BlenderMCPServer()
-        self.tls_context = self.executor._load_tls_context()
+        self.executor = server_class()
+        connection = importlib.import_module(
+            server_class.__module__.rsplit(".", 1)[0] + ".connection"
+        )
+        self.tls_context = connection.load_tls_context()
         env = dict(
             os.environ,
             BLENDER_HOST="127.0.0.1",
@@ -103,7 +106,7 @@ class Client:
         name, params = command["type"], command["params"]
         if name == "execute_code":
             try:
-                result = self.executor.execute_code(**params)
+                result = self.executor.execution.execute_code(**params)
             except Exception as error:
                 logger.exception("Blender rejected test script")
                 return {"status": "error", "message": str(error)}
@@ -176,8 +179,8 @@ class Client:
 
 
 @pytest.fixture
-def client(binary, tmp_path):
-    client = Client(binary, tmp_path)
+def client(binary, tmp_path, server_class):
+    client = Client(binary, tmp_path, server_class)
     try:
         yield client
     finally:
@@ -623,10 +626,10 @@ def test_binary_contains_addon(unpacked_addon):
 
 
 def test_removed_integrations_are_not_dispatched(client, monkeypatch):
-    from addon_stub import _load_addon, _scene
+    from addon_stub import _load_addon
 
-    addon = _load_addon(monkeypatch, _scene())
-    server = addon.BlenderMCPServer()
+    addon = _load_addon(monkeypatch)
+    server = addon.server.BlenderMCPServer()
     for name in (
         "get_polyhaven_status",
         "download_polyhaven_asset",

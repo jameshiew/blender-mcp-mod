@@ -2,10 +2,14 @@ import importlib.util
 import sys
 import types
 
-from conftest import ROOT_ADDON as ADDON
+from conftest import BLENDER_VERSION, BLENDER_VERSION_MIN, ROOT_ADDON
+
+loaded_packages = set()
 
 
-def _load_addon(monkeypatch, scene, selected_objects=()):
+def _install_bpy_stubs(monkeypatch, scene=None, selected_objects=()):
+    if scene is None:
+        scene = _scene()
     bpy = types.ModuleType("bpy")
     bpy.context = types.SimpleNamespace(
         scene=scene,
@@ -13,7 +17,8 @@ def _load_addon(monkeypatch, scene, selected_objects=()):
         view_layer=types.SimpleNamespace(update=lambda: None),
     )
     bpy.ops = types.SimpleNamespace(
-        import_scene=types.SimpleNamespace(gltf=lambda **_kwargs: None)
+        import_scene=types.SimpleNamespace(gltf=_unexpected_import),
+        wm=types.SimpleNamespace(obj_import=_unexpected_import),
     )
     bpy.types = types.SimpleNamespace(
         AddonPreferences=object,
@@ -40,8 +45,8 @@ def _load_addon(monkeypatch, scene, selected_objects=()):
     handlers.depsgraph_update_post = []
 
     app = types.ModuleType("bpy.app")
-    app.version = (5, 2, 0)
-    app.version_string = "5.2.0"
+    app.version = BLENDER_VERSION
+    app.version_string = BLENDER_VERSION_MIN
     app.background = False
     app.online_access = True
     app.handlers = handlers
@@ -56,17 +61,44 @@ def _load_addon(monkeypatch, scene, selected_objects=()):
     monkeypatch.setitem(sys.modules, "bpy.props", props)
     monkeypatch.setitem(sys.modules, "bpy.app", app)
     monkeypatch.setitem(sys.modules, "bpy.app.handlers", handlers)
-    monkeypatch.setitem(sys.modules, "mathutils", types.ModuleType("mathutils"))
+    mathutils = types.ModuleType("mathutils")
+    mathutils.Vector = tuple
+    monkeypatch.setitem(sys.modules, "mathutils", mathutils)
 
     requests = types.ModuleType("requests")
     requests.utils = types.SimpleNamespace(default_headers=dict)
     requests.exceptions = types.SimpleNamespace(Timeout=TimeoutError)
     monkeypatch.setitem(sys.modules, "requests", requests)
 
-    spec = importlib.util.spec_from_file_location("blender_mcp_test", ADDON)
+    return bpy
+
+
+def load_addon_package(monkeypatch, path=ROOT_ADDON, name="blender_mcp_test"):
+    loaded_packages.add(name)
+    parts = name.split(".")
+    for index in range(1, len(parts)):
+        parent_name = ".".join(parts[:index])
+        if parent_name not in sys.modules:
+            parent = types.ModuleType(parent_name)
+            parent.__path__ = []
+            monkeypatch.setitem(sys.modules, parent_name, parent)
+    for module_name in list(sys.modules):
+        if module_name == name or module_name.startswith(name + "."):
+            monkeypatch.delitem(sys.modules, module_name)
+    spec = importlib.util.spec_from_file_location(name, path)
     addon = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, addon)
     spec.loader.exec_module(addon)
     return addon
+
+
+def _load_addon(monkeypatch, scene=None, selected_objects=()):
+    _install_bpy_stubs(monkeypatch, scene, selected_objects)
+    return load_addon_package(monkeypatch)
+
+
+def _unexpected_import(**_kwargs):
+    raise AssertionError("unexpected model import")
 
 
 def _scene():

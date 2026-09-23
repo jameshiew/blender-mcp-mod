@@ -1,14 +1,11 @@
 import base64
 import hashlib
-import importlib.util
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from addon_stub import _load_addon, _scene
-from conftest import ROOT_ADDON
+from addon_stub import _load_addon
 
 
 class Process:
@@ -36,29 +33,24 @@ class Process:
 
 @pytest.fixture
 def renders(monkeypatch):
-    addon = _load_addon(monkeypatch, _scene())
-    name = "render_jobs_test"
-    spec = importlib.util.spec_from_file_location(
-        name, ROOT_ADDON.with_name("render_jobs.py")
-    )
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, name, module)
-    spec.loader.exec_module(module)
+    addon = _load_addon(monkeypatch)
+    module = addon.render_jobs
+    bpy = module.bpy
     scene = type("Scene", (), {})()
     scene.name = "植物 • Scene"
     scene.blendermcp_use_sketchfab = False
     scene.camera = SimpleNamespace(type="CAMERA")
     scene.frame_current = 12
     scene.render = SimpleNamespace(engine="CYCLES", resolution_percentage=80)
-    addon.bpy.context.scene = scene
-    addon.bpy.app.binary_path = "/Blender with spaces/blender"
+    bpy.context.scene = scene
+    bpy.app.binary_path = "/Blender with spaces/blender"
     snapshots = []
 
     def write(path, datablocks, **kwargs):
         snapshots.append((path, datablocks, kwargs))
         Path(path).write_bytes(b"snapshot")
 
-    addon.bpy.data = SimpleNamespace(
+    bpy.data = SimpleNamespace(
         scenes={scene.name: scene},
         libraries=SimpleNamespace(write=write),
     )
@@ -103,6 +95,31 @@ def complete(renders, job_id, width=640, height=480):
     (job.directory / "render.png").write_bytes(b"render-image")
     job.process.code = 0
     return job
+
+
+def test_server_without_render_does_not_allocate_render_resources(renders, monkeypatch):
+    def unexpected(*args, **kwargs):
+        raise AssertionError("render resources allocated without a render")
+
+    monkeypatch.setattr(renders.module.tempfile, "TemporaryDirectory", unexpected)
+    monkeypatch.setattr(renders.module.atexit, "register", unexpected)
+    server = renders.addon.server.BlenderMCPServer()
+    server.stop()
+
+
+def test_server_can_render_again_after_stopping(renders):
+    server = renders.addon.server.BlenderMCPServer(renders=renders.manager)
+    first = server.execute_command({"type": "start_render"})
+    assert first["status"] == "success"
+    first_directory = renders.manager._jobs[first["result"]["job_id"]].directory
+    server.stop()
+    assert not first_directory.exists()
+    second = server.execute_command({"type": "start_render"})
+    assert second["status"] == "success"
+    assert second["result"]["job_id"] != first["result"]["job_id"]
+    assert len(renders.processes) == 2
+    server.stop()
+    assert all(process.killed == 1 for process in renders.processes)
 
 
 def test_snapshot_job_does_not_change_scene_and_blocks_overlap(renders):
@@ -265,7 +282,7 @@ def test_image_scaling_cleans_up_datablock_and_preserves_original(renders):
         scale=lambda *size: scaled.append(size),
         save=lambda: Path(image.filepath_raw).write_bytes(b"preview-image"),
     )
-    renders.addon.bpy.data.images = SimpleNamespace(
+    renders.module.bpy.data.images = SimpleNamespace(
         load=lambda path, check_existing: image,
         remove=lambda item: removed.append(item),
     )
@@ -287,7 +304,7 @@ def test_image_scaling_cleans_up_datablock_and_preserves_original(renders):
 
 
 def test_addon_dispatch_and_stop_own_the_render_manager(renders):
-    server = renders.addon.BlenderMCPServer()
+    server = renders.addon.server.BlenderMCPServer(renders=renders.manager)
     for command, params in [
         ("get_render_status", {}),
         ("cancel_render", {"job_id": "unknown"}),
@@ -298,14 +315,13 @@ def test_addon_dispatch_and_stop_own_the_render_manager(renders):
             server.execute_command({"type": command, "params": params})["status"]
             == "error"
         )
-    server._render_jobs = renders.manager
     response = server.execute_command({"type": "start_render", "params": {}})
     assert response["status"] == "success"
     job_id = response["result"]["job_id"]
-    assert server.get_render_status()["job_id"] == job_id
-    assert server.cancel_render(job_id)["state"] == "cancelling"
+    assert server.renders.status()["job_id"] == job_id
+    assert server.renders.cancel(job_id)["state"] == "cancelling"
     server.stop()
-    assert server._render_jobs is None
+    assert not server.renders._jobs
     assert renders.processes[0].killed == 1
 
 
@@ -313,9 +329,8 @@ def test_export_keeps_full_image_after_job_cleanup(renders, tmp_path):
     job_id = renders.manager.start()["job_id"]
     complete(renders, job_id, width=4000, height=2000)
     destination = tmp_path / "永久 image.png"
-    server = renders.addon.BlenderMCPServer()
-    server._render_jobs = renders.manager
-    result = server.export_render(job_id, str(destination))
+    server = renders.addon.server.BlenderMCPServer(renders=renders.manager)
+    result = server.renders.export(job_id, str(destination))
     assert result == {
         "job_id": job_id,
         "filepath": str(destination),

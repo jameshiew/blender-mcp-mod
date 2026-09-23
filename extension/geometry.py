@@ -132,3 +132,13 @@ def evaluated_geometry(obj):
             ),
         },
     }
+
+
+def world_bounding_box(obj):
+    if obj.type != "MESH":
+        raise TypeError("Object must be a mesh")
+    local_bbox_corners = [Vector(corner) for corner in obj.bound_box]
+    world_bbox_corners = [obj.matrix_world @ corner for corner in local_bbox_corners]
+    min_corner = Vector(map(min, zip(*world_bbox_corners)))
+    max_corner = Vector(map(max, zip(*world_bbox_corners)))
+    return [[*min_corner], [*max_corner]]

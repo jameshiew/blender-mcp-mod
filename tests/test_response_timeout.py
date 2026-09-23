@@ -2,12 +2,13 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from test_server_threading import BlenderMCPServer
 
 
 @pytest.mark.parametrize("failure", [TimeoutError, ConnectionResetError])
-def test_response_send_failure_closes_client_before_another_command(failure):
-    server = BlenderMCPServer()
+def test_response_send_failure_closes_client_before_another_command(
+    server_class, failure
+):
+    server = server_class()
     server.running = True
     commands = []
 

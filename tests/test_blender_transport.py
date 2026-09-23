@@ -16,7 +16,9 @@ from test_rust_server import Client
     not os.environ.get("BLENDER_TEST_EXECUTABLE"),
     reason="Set BLENDER_TEST_EXECUTABLE for the native Blender GUI test",
 )
-def test_native_blender_transport(binary, tmp_path, connection_credentials):
+def test_native_blender_transport(
+    binary, tmp_path, connection_credentials, server_class
+):
     environment = blender_environment(tmp_path / "profile")
     subprocess.run(
         [
@@ -44,7 +46,7 @@ name = "bl_ext.user_default.blender_mcp"
 addon_utils.enable(name, default_set=True)
 addon = sys.modules[name]
 addon_utils.disable(name, default_set=True)
-server = addon.BlenderMCPServer(port=0)
+server = addon.server.BlenderMCPServer(port=0)
 bpy.types.blendermcp_server = server
 addon_utils.enable(name, default_set=True)
 Path({str(ready)!r}).write_text(json.dumps({{"port": server.port, "running": server.running, "error": server.last_error, "version": bpy.app.version_string}}))
@@ -112,7 +114,10 @@ bpy.app.timers.register(finish, persistent=True)
                     except OSError:
                         pass
             client = Client(
-                binary, tmp_path, server=SimpleNamespace(port=state["port"])
+                binary,
+                tmp_path,
+                server_class,
+                server=SimpleNamespace(port=state["port"]),
             )
             status = json.loads(
                 client.call("get_addon_status", {})["content"][0]["text"]
@@ -377,7 +382,7 @@ bpy.context.view_layer.update()
             check = call(
                 "execute_blender_code",
                 {
-                    "code": "print(bpy.context.scene.blendermcp_server_running)\nprint(len(bpy.types.blendermcp_server._execution_namespaces))"
+                    "code": "print(bpy.context.scene.blendermcp_server_running)\nprint(len(bpy.types.blendermcp_server.execution._execution_namespaces))"
                 },
             )
             assert check["result"] == "True\n0\n"
