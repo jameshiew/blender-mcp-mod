@@ -1,7 +1,7 @@
 [tools]
 just = "latest"
 pinact = "latest"
-rust = "latest"
+rust = { version = "latest", components = ["clippy", "rustfmt"] }
 uv = "latest"
 
 [env]
