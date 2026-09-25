@@ -28,3 +28,9 @@ verify:
     just typecheck
     cargo clippy --locked --all-targets -- -D warnings
     just test
+
+pin-actions:
+    pinact run --verify-comment
+
+check-actions:
+    pinact run --check --verify-comment

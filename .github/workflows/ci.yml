@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  BLENDER_VERSION: 5.2.2
+  BLENDER_SHA256: 84098912789dc450e95697c4184fb8a90acbe5111c2ba4aede3fecb57806a168
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: just sync-wheels
+      - run: just verify
+
+  native:
+    name: Native (Blender)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install display and graphics libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb xauth libegl1 libgl1 libgl1-mesa-dri mesa-vulkan-drivers \
+            libxi6 libxkbcommon0 libxkbcommon-x11-0 libxrender1 libxxf86vm1 \
+            libxfixes3 libsm6 libice6 libwayland-client0 libdecor-0-0
+      - id: blender-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/blender
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
+      - name: Download Blender
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        run: |
+          archive="blender-${BLENDER_VERSION}-linux-x64.tar.xz"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/$archive" \
+            "https://download.blender.org/release/Blender${BLENDER_VERSION%.*}/$archive"
+          echo "$BLENDER_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check
+          mkdir -p ~/blender
+          tar --extract --file "$RUNNER_TEMP/$archive" --directory ~/blender --strip-components 1
+      - run: just sync-wheels
+      - name: Run tests with Blender
+        run: |
+          export BLENDER_TEST_EXECUTABLE="$HOME/blender/blender"
+          xvfb-run --auto-servernum --server-args "-screen 0 1920x1080x24" just test
+
+  actions:
+    name: Pinned actions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - run: just check-actions
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
