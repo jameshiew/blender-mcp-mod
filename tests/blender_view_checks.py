@@ -7,6 +7,7 @@ if TYPE_CHECKING:
 def run_checks(server, viewport=False):
     import base64
     import math
+    from contextlib import AbstractContextManager
     from itertools import product
     from typing import cast
 
@@ -31,10 +32,11 @@ def run_checks(server, viewport=False):
     selected = list(bpy.context.selected_objects or ())
     active = bpy.context.view_layer.objects.active
     view_state = None
-    space = r3d = other_view_state = None
+    area = region = space = r3d = other_view_state = None
     if viewport:
         assert bpy.context.screen is not None
         area = next(area for area in bpy.context.screen.areas if area.type == "VIEW_3D")
+        region = next(region for region in area.regions if region.type == "WINDOW")
         space = cast(bpy.types.SpaceView3D, area.spaces.active)
         r3d = space.region_3d
         assert r3d is not None
@@ -203,6 +205,7 @@ def run_checks(server, viewport=False):
         )
 
         if viewport:
+            assert area is not None and region is not None
             assert space is not None and r3d is not None
             original_selection = [o.name for o in (bpy.context.selected_objects or ())]
             original_transform = camera.matrix_world.copy()
@@ -233,6 +236,18 @@ def run_checks(server, viewport=False):
                         and abs(clip.x / clip.w) < 1
                         and abs(clip.y / clip.w) < 1
                     ), (view, clip[:], result)
+                if view != "ISO":
+                    rotation = r3d.view_rotation.copy()
+                    with cast(
+                        AbstractContextManager[object],
+                        bpy.context.temp_override(area=area, region=region),
+                    ):
+                        bpy.ops.view3d.view_axis(type=view)
+                    assert abs(rotation.dot(r3d.view_rotation)) > 1 - 1e-6, (
+                        view,
+                        rotation[:],
+                        r3d.view_rotation[:],
+                    )
             server.handlers["set_viewport"](frame="ALL")
             for selected_obj in bpy.context.selected_objects or ():
                 selected_obj.select_set(False)

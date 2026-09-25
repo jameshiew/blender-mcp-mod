@@ -31,6 +31,14 @@ _PANORAMA_TYPES = (
     "FISHEYE_LENS_POLYNOMIAL",
     "CENTRAL_CYLINDRICAL",
 )
+_AXIS_VIEW_ROTATIONS = {
+    "FRONT": (math.sqrt(0.5), math.sqrt(0.5), 0, 0),
+    "BACK": (0, 0, math.sqrt(0.5), math.sqrt(0.5)),
+    "LEFT": (0.5, 0.5, -0.5, -0.5),
+    "RIGHT": (0.5, 0.5, 0.5, 0.5),
+    "TOP": (1, 0, 0, 0),
+    "BOTTOM": (0, 1, 0, 0),
+}
 
 
 class CaptureOptions(TypedDict, total=False):
@@ -359,16 +367,7 @@ def set_viewport(
     overlays: bool | None = None,
     gizmos: bool | None = None,
 ) -> dict[str, object]:
-    directions = {
-        "FRONT": (0, -1, 0),
-        "BACK": (0, 1, 0),
-        "LEFT": (-1, 0, 0),
-        "RIGHT": (1, 0, 0),
-        "TOP": (0, 0, 1),
-        "BOTTOM": (0, 0, -1),
-        "ISO": (1, -1, 1),
-    }
-    _choice("view", view, (*directions, "CAMERA"))
+    _choice("view", view, (*_AXIS_VIEW_ROTATIONS, "ISO", "CAMERA"))
     _choice("projection", projection, ("PERSP", "ORTHO"))
     _choice("frame", frame, ("ALL", "SELECTED"))
     _choice("shading", shading, ("WIREFRAME", "SOLID", "MATERIAL", "RENDERED"))
@@ -402,7 +401,7 @@ def set_viewport(
             else "PERSP"
             if view == "ISO"
             else "ORTHO"
-            if view in directions
+            if view in _AXIS_VIEW_ROTATIONS
             else "PERSP"
             if framing and r3d.view_perspective == "CAMERA"
             else r3d.view_perspective
@@ -416,8 +415,10 @@ def set_viewport(
         elif camera_zoom is not None:
             raise ValueError("camera_zoom requires camera view")
         objects = _targets(object_names, frame, space) if framing else []
-        if view is not None and view in directions:
-            r3d.view_rotation = (-Vector(directions[view])).to_track_quat("-Z", "Y")
+        if view in _AXIS_VIEW_ROTATIONS:
+            r3d.view_rotation = _AXIS_VIEW_ROTATIONS[view]
+        elif view == "ISO":
+            r3d.view_rotation = Vector((-1, 1, -1)).to_track_quat("-Z", "Y")
         r3d.view_perspective = perspective
         if framing:
             points, center = _points(objects, padding)

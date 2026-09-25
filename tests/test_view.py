@@ -93,6 +93,60 @@ def test_viewport_uses_requested_window_and_reports_missing_or_quad_view(view):
         module.viewport_context(0)
 
 
+@pytest.mark.parametrize(
+    ("name", "right", "up"),
+    [
+        ("FRONT", (1, 0, 0), (0, 0, 1)),
+        ("BACK", (-1, 0, 0), (0, 0, 1)),
+        ("LEFT", (0, -1, 0), (0, 0, 1)),
+        ("RIGHT", (0, 1, 0), (0, 0, 1)),
+        ("TOP", (1, 0, 0), (0, 1, 0)),
+        ("BOTTOM", (1, 0, 0), (0, -1, 0)),
+    ],
+)
+def test_axis_views_match_blender_numpad_orientation(
+    view, monkeypatch, name, right, up
+):
+    module, bpy = view
+    region = SimpleNamespace(
+        view_rotation=(0, 0, 0, 1),
+        view_perspective="PERSP",
+        view_location=(0, 0, 0),
+        view_distance=10,
+        view_camera_zoom=0,
+        update=lambda: None,
+    )
+    space = SimpleNamespace(
+        region_3d=region,
+        camera=None,
+        use_local_camera=False,
+        shading=SimpleNamespace(type="SOLID"),
+        overlay=SimpleNamespace(show_overlays=True),
+        show_gizmo=True,
+    )
+    area = SimpleNamespace(
+        spaces=SimpleNamespace(active=space), tag_redraw=lambda: None
+    )
+    monkeypatch.setattr(module, "viewport_context", lambda _: (None, area, None))
+    bpy.context.temp_override = lambda **_kw: nullcontext()
+    bpy.context.scene.name = "Scene"
+    bpy.context.scene.camera = None
+    bpy.context.view_layer.name = "ViewLayer"
+    result = module.set_viewport(view=name)
+    assert result["projection"] == "ORTHO"
+    w, x, y, z = result["rotation"]
+    assert (
+        1 - 2 * (y * y + z * z),
+        2 * (x * y + w * z),
+        2 * (x * z - w * y),
+    ) == pytest.approx(right)
+    assert (
+        2 * (x * y - w * z),
+        1 - 2 * (x * x + z * z),
+        2 * (y * z + w * x),
+    ) == pytest.approx(up)
+
+
 def test_camera_capture_does_not_fall_back_to_unrelated_window_image(view, monkeypatch):
     module, bpy = view
     matrix = SimpleNamespace(normalized=lambda: SimpleNamespace(inverted=lambda: None))
