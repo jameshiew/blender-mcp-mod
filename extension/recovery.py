@@ -248,7 +248,7 @@ class Checkpoints:
             r"[0-9a-f]{32}", checkpoint_id
         ):
             raise ValueError(
-                "checkpoint_id must be an ID returned by create_checkpoint"
+                "checkpoint_id must be an ID from creating or listing checkpoints"
             )
         return (
             self.directory / f"{checkpoint_id}.blend",

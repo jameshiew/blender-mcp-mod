@@ -19,6 +19,7 @@ class Client:
         self.commands = []
         self.errors = queue.Queue()
         self.responses = queue.Queue()
+        self.notifications = queue.Queue()
         self.stopped = threading.Event()
         self.listener = socket.socket()
         self.listener.bind(("127.0.0.1", 0))
@@ -68,9 +69,14 @@ class Client:
     def read_responses(self):
         for line in self.stdout:
             try:
-                self.responses.put(json.loads(line))
+                message = json.loads(line)
             except json.JSONDecodeError as error:
                 self.responses.put(error)
+                continue
+            if "id" in message:
+                self.responses.put(message)
+            else:
+                self.notifications.put(message)
 
     def serve(self):
         try:
@@ -235,21 +241,21 @@ CASES = [
         {"name": "Cube", "details": True},
     ),
     (
-        "create_checkpoint",
-        {"label": "Before edits"},
+        "checkpoints",
+        {"action": "create", "label": "Before edits"},
         "create_checkpoint",
         {"label": "Before edits"},
     ),
-    ("list_checkpoints", {}, "list_checkpoints", {}),
+    ("checkpoints", {"action": "list"}, "list_checkpoints", {}),
     (
-        "restore_checkpoint",
-        {"checkpoint_id": "a" * 32},
+        "checkpoints",
+        {"action": "restore", "checkpoint_id": "a" * 32},
         "restore_checkpoint",
         {"checkpoint_id": "a" * 32},
     ),
     (
-        "delete_checkpoint",
-        {"checkpoint_id": "a" * 32},
+        "checkpoints",
+        {"action": "delete", "checkpoint_id": "a" * 32},
         "delete_checkpoint",
         {"checkpoint_id": "a" * 32},
     ),
@@ -357,6 +363,8 @@ def test_all_tools_over_stdio_and_tcp(client):
     catalog = client.rpc("tools/list", {})["result"]["tools"]
     assert {tool["name"] for tool in catalog} == {case[0] for case in CASES}
     assert "user_prompt" not in json.dumps(catalog)
+    assert client.commands == [{"type": "get_addon_info", "params": {}}]
+    client.commands.clear()
     for name, arguments, command, params in CASES:
         result = client.call(name, arguments)
         assert not result.get("isError"), (name, result)
@@ -435,6 +443,75 @@ def test_structured_execution_failure_survives_mcp_transport(client, monkeypatch
     assert result["structuredContent"] == outcome
     assert json.loads(result["content"][0]["text"]) == outcome
     assert client.commands[-1]["params"]["checkpoint"] is True
+
+
+def sketchfab_setting(client, enabled):
+    def respond(command):
+        if command["type"] == "get_addon_info":
+            runtime = {"sketchfab": {"enabled": enabled()}}
+            return {"status": "success", "result": {"runtime": runtime}}
+        return {"status": "success", "result": {}}
+
+    client.respond = respond
+
+
+def tool_names(client):
+    return {tool["name"] for tool in client.rpc("tools/list", {})["result"]["tools"]}
+
+
+SKETCHFAB_TOOLS = {
+    "get_sketchfab_status",
+    "search_sketchfab_models",
+    "get_sketchfab_model_preview",
+    "download_sketchfab_model",
+}
+
+
+def test_sketchfab_tools_follow_blender_setting(client):
+    enabled = False
+    sketchfab_setting(client, lambda: enabled)
+    names = tool_names(client)
+    assert not names & SKETCHFAB_TOOLS
+    assert "checkpoints" in names
+
+    enabled = True
+    client.call("get_addon_status", {})
+    notification = client.notifications.get(timeout=5)
+    assert notification["method"] == "notifications/tools/list_changed"
+    assert tool_names(client) >= SKETCHFAB_TOOLS
+    assert [command["type"] for command in client.commands] == [
+        "get_addon_info",
+        "get_addon_info",
+    ]
+
+    client.call("get_addon_status", {})
+    assert client.notifications.empty()
+
+
+def test_sketchfab_tools_stay_listed_without_blender(binary, tmp_path, server_class):
+    client = Client(binary, tmp_path, server_class)
+    try:
+        client.stopped.set()
+        client.worker.join(timeout=2)
+        client.listener.close()
+        assert tool_names(client) >= SKETCHFAB_TOOLS
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"action": "undo"},
+        {"action": "restore"},
+        {"action": "restore", "checkpoint_id": "missing"},
+        {"action": "list", "label": "Before edits"},
+        {"action": "create", "checkpoint_id": "a" * 32},
+    ],
+)
+def test_checkpoint_actions_reject_mismatched_arguments(client, arguments):
+    assert client.call("checkpoints", arguments)["isError"]
+    assert not client.commands
 
 
 @pytest.mark.parametrize(

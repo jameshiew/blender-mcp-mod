@@ -363,7 +363,9 @@ bpy.context.view_layer.update()
             image = base64.b64decode(screenshot["content"][0]["data"])
             assert image.startswith(b"\x89PNG\r\n\x1a\n")
             (tmp_path / "viewport.png").write_bytes(image)
-            checkpoint = call("create_checkpoint", {"label": "Transport recovery"})
+            checkpoint = call(
+                "checkpoints", {"action": "create", "label": "Transport recovery"}
+            )
             failed = client.call(
                 "execute_blender_code",
                 {
@@ -386,7 +388,8 @@ bpy.context.view_layer.update()
             assert page == outcome["changes"]["created"]
             assert call("get_execution_result", {}) == outcome
             restored = call(
-                "restore_checkpoint", {"checkpoint_id": checkpoint["checkpoint_id"]}
+                "checkpoints",
+                {"action": "restore", "checkpoint_id": checkpoint["checkpoint_id"]},
             )
             assert restored["namespaces_cleared"]
             assert (
@@ -403,8 +406,11 @@ bpy.context.view_layer.update()
             )
             assert check["result"] == "True\n0\n"
             call(
-                "restore_checkpoint",
-                {"checkpoint_id": restored["safety_checkpoint"]["checkpoint_id"]},
+                "checkpoints",
+                {
+                    "action": "restore",
+                    "checkpoint_id": restored["safety_checkpoint"]["checkpoint_id"],
+                },
             )
             assert (
                 call("get_scene_info", {"name_filter": "Recovery.Transport"})[

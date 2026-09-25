@@ -11,6 +11,26 @@ COMMAND_ALIASES = {
     "get_addon_status": "get_addon_info",
     "execute_blender_code": "execute_code",
 }
+CHECKPOINT_COMMANDS = {
+    "create_checkpoint": ["label"],
+    "list_checkpoints": [],
+    "restore_checkpoint": ["checkpoint_id"],
+    "delete_checkpoint": ["checkpoint_id"],
+}
+
+
+def catalog_commands():
+    for tool in CATALOG:
+        if tool["name"] == "checkpoints":
+            for command, names in CHECKPOINT_COMMANDS.items():
+                yield command, names, names
+            continue
+        schema = tool["inputSchema"]
+        yield (
+            COMMAND_ALIASES.get(tool["name"], tool["name"]),
+            schema.get("required", []),
+            list(schema["properties"]),
+        )
 
 
 @pytest.fixture
@@ -21,7 +41,8 @@ def packaged_addon(unpacked_addon, monkeypatch):
 
 def test_catalog_commands_and_capabilities_match(packaged_addon, monkeypatch):
     server = packaged_addon.server.BlenderMCPServer()
-    commands = [COMMAND_ALIASES.get(tool["name"], tool["name"]) for tool in CATALOG]
+    catalog = list(catalog_commands())
+    commands = [command for command, _, _ in catalog]
     assert len(set(commands)) == len(commands)
     sketchfab_commands = {name for name in commands if "sketchfab" in name}
     core_commands = set(commands) - sketchfab_commands
@@ -34,7 +55,7 @@ def test_catalog_commands_and_capabilities_match(packaged_addon, monkeypatch):
     assert information["result"]["capabilities"] == sorted(core_commands)
 
     packaged_addon.server.bpy.context.scene.blendermcp_use_sketchfab = True
-    for tool, command in zip(CATALOG, commands, strict=True):
+    for command, required, properties in catalog:
         registry = (
             server.sketchfab_handlers
             if command in sketchfab_commands
@@ -45,9 +66,8 @@ def test_catalog_commands_and_capabilities_match(packaged_addon, monkeypatch):
         else:
             handler = registry[command]
         signature = inspect.signature(handler)
-        schema = tool["inputSchema"]
         parameters = {}
-        for names in (schema.get("required", []), schema["properties"]):
+        for names in (required, properties):
             parameters = {
                 "name"
                 if command == "get_object_info" and name == "object_name"

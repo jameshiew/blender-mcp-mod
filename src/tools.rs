@@ -56,6 +56,27 @@ pub async fn prepare(name: &str, mut args: Map<String, Value>) -> Result<(String
             name
         }
         "execute_blender_code" => "execute_code",
+        "checkpoints" => {
+            let action = args
+                .remove("action")
+                .and_then(|action| action.as_str().map(str::to_owned))
+                .context("Missing action")?;
+            let (command, parameter) = match action.as_str() {
+                "create" => ("create_checkpoint", Some("label")),
+                "list" => ("list_checkpoints", None),
+                "restore" => ("restore_checkpoint", Some("checkpoint_id")),
+                "delete" => ("delete_checkpoint", Some("checkpoint_id")),
+                _ => bail!("Unknown checkpoint action: {action}"),
+            };
+            if let Some(unused) = args.keys().find(|key| Some(key.as_str()) != parameter) {
+                bail!("{unused} is not used by the {action} action");
+            }
+            ensure!(
+                parameter != Some("checkpoint_id") || args.contains_key("checkpoint_id"),
+                "The {action} action requires checkpoint_id"
+            );
+            command
+        }
         "download_sketchfab_model" => {
             args.insert("normalize_size".into(), json!(true));
             name
@@ -134,7 +155,7 @@ mod tests {
     #[test]
     fn catalog_preserves_tools_without_collection_parameters() {
         let tools = definitions().unwrap();
-        assert_eq!(tools.len(), 29);
+        assert_eq!(tools.len(), 26);
         for definition in tools {
             assert!(!definition.tool.name.contains("telemetry"));
             assert!(!definition.tool.name.contains("trajectory"));
@@ -182,6 +203,74 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    const BUDGET_BYTES: usize = 17_500;
+
+    #[test]
+    fn catalog_and_instructions_fit_context_budget() {
+        let catalog: usize = definitions()
+            .unwrap()
+            .iter()
+            .map(|definition| {
+                let tool = &definition.tool;
+                tool.name.len()
+                    + tool.description.as_deref().map_or(0, str::len)
+                    + serde_json::to_string(&*tool.input_schema).unwrap().len()
+            })
+            .sum();
+        let total = catalog + crate::server::INSTRUCTIONS.trim_end().len();
+        assert!(
+            total <= BUDGET_BYTES,
+            "Tool catalog and instructions use {total} bytes, over the {BUDGET_BYTES}-byte budget"
+        );
+    }
+
+    #[tokio::test]
+    async fn maps_checkpoint_actions_to_addon_commands() {
+        let id = "a".repeat(32);
+        for (arguments, command, params) in [
+            (
+                json!({"action":"create", "label":"Before"}),
+                "create_checkpoint",
+                json!({"label":"Before"}),
+            ),
+            (json!({"action":"create"}), "create_checkpoint", json!({})),
+            (json!({"action":"list"}), "list_checkpoints", json!({})),
+            (
+                json!({"action":"restore", "checkpoint_id":id}),
+                "restore_checkpoint",
+                json!({"checkpoint_id":id}),
+            ),
+            (
+                json!({"action":"delete", "checkpoint_id":id}),
+                "delete_checkpoint",
+                json!({"checkpoint_id":id}),
+            ),
+        ] {
+            assert_eq!(
+                prepare("checkpoints", args("checkpoints", arguments).unwrap())
+                    .await
+                    .unwrap(),
+                (command.into(), params)
+            );
+        }
+        for invalid in [
+            json!({}),
+            json!({"action":"undo"}),
+            json!({"action":"restore", "checkpoint_id":"missing"}),
+        ] {
+            assert!(args("checkpoints", invalid).is_err());
+        }
+        for mismatched in [
+            json!({"action":"restore"}),
+            json!({"action":"delete", "label":"Before"}),
+            json!({"action":"list", "label":"Before"}),
+            json!({"action":"create", "checkpoint_id":id}),
+        ] {
+            let arguments = args("checkpoints", mismatched).unwrap();
+            assert!(prepare("checkpoints", arguments).await.is_err());
+        }
     }
 
     #[test]

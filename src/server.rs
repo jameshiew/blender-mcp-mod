@@ -1,16 +1,30 @@
-use std::sync::Arc;
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use anyhow::Result;
 use rmcp::{ErrorData, RoleServer, ServerHandler, model::*, service::RequestContext};
+use serde_json::{Value, json};
+use tokio::time::timeout;
 
 use crate::{
     connection::BlenderConnection,
     tools::{self, ToolDefinition},
 };
 
+pub const INSTRUCTIONS: &str = include_str!("../resources/instructions.txt");
+
+#[derive(Default)]
+struct Sketchfab {
+    enabled: Option<bool>,
+    listed: Option<bool>,
+}
+
 pub struct BlenderServer {
     connection: Arc<BlenderConnection>,
     tools: Vec<ToolDefinition>,
+    sketchfab: Mutex<Sketchfab>,
 }
 
 impl BlenderServer {
@@ -18,15 +32,35 @@ impl BlenderServer {
         Ok(Self {
             connection: Arc::new(BlenderConnection::new(host, port)),
             tools: tools::definitions()?,
+            sketchfab: Mutex::default(),
         })
+    }
+
+    /// Records Blender's Sketchfab setting and reports whether the listed tools are now stale.
+    fn observe_sketchfab(&self, addon_info: &Value) -> bool {
+        let Some(enabled) = addon_info["runtime"]["sketchfab"]["enabled"].as_bool() else {
+            return false;
+        };
+        let mut sketchfab = self.sketchfab.lock().unwrap();
+        sketchfab.enabled = Some(enabled);
+        sketchfab.listed.is_some_and(|listed| listed != enabled)
     }
 }
 
 impl ServerHandler for BlenderServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().enable_prompts().build())
-            .with_server_info(Implementation::new("blender-mcp", env!("CARGO_PKG_VERSION")))
-            .with_instructions("Control Blender through its MCP extension. Start with get_addon_status and get_scene_info; follow next_offset when more objects are needed. Inspect exact object names before editing. Use get_blender_api_info to inspect installed RNA type properties, functions, and operator parameters before writing Python; static enums may omit context-dependent choices. Rotation arrays follow rotation_mode. File loads and undo/redo clear execution namespaces to discard invalid Blender references. Use get_object_info(details=true) for concise material, modifier, and animation summaries; use get_material_info, get_node_group_info, get_modifier_info, and get_animation_info for focused inspection. Follow has_more/next_offset and check details_omitted/omitted fields before assuming inspection is complete. Use set_camera for lens, sensor, depth of field, panoramic projection, and camera framing; use set_viewport for view direction, framing, zoom, and shading. Use execute_blender_code for modeling, materials, and scene operations, and Sketchfab when external assets suit the task. Batch related edits, print concise results, and verify visible changes with get_viewport_screenshot. For stills, use start_render; for PNG sequences, use start_animation_render with a new output directory. Poll get_render_status, retrieve get_render_image or save export_render, and use cancel_render to stop a job. Animation status includes completed and total frame counts; previews and exports accept a completed frame while rendering. Use resume_animation_render with the output directory to continue after cancellation or server restart from the original snapshot. For recoverable edits, opt into checkpoint and summarize_changes on execute_blender_code. Errors and timeouts can leave partial changes: check started, succeeded, and partial_changes; use get_execution_result for opted-in calls and get_execution_changes for additional change pages before retrying. restore_checkpoint saves a safety checkpoint, opens a working copy, and clears all namespaces. Credit assets using returned attribution. JSON results are available as structuredContent and text; image tools also return capture metadata.")
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .enable_prompts()
+                .build(),
+        )
+        .with_server_info(Implementation::new(
+            "blender-mcp",
+            env!("CARGO_PKG_VERSION"),
+        ))
+        .with_instructions(INSTRUCTIONS.trim_end())
     }
 
     async fn list_tools(
@@ -34,9 +68,26 @@ impl ServerHandler for BlenderServer {
         _: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
+        if self.sketchfab.lock().unwrap().enabled.is_none()
+            && let Ok(Ok(info)) = timeout(
+                Duration::from_secs(2),
+                self.connection.send("get_addon_info", json!({})),
+            )
+            .await
+        {
+            self.observe_sketchfab(&info);
+        }
+        // Without a known setting, list Sketchfab tools so they stay reachable.
+        let show_sketchfab = {
+            let mut sketchfab = self.sketchfab.lock().unwrap();
+            let show = sketchfab.enabled != Some(false);
+            sketchfab.listed = Some(show);
+            show
+        };
         Ok(ListToolsResult::with_all_items(
             self.tools
                 .iter()
+                .filter(|definition| show_sketchfab || !definition.tool.name.contains("sketchfab"))
                 .map(|definition| definition.tool.clone())
                 .collect(),
         ))
@@ -52,7 +103,7 @@ impl ServerHandler for BlenderServer {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let definition = self
             .tools
@@ -69,6 +120,15 @@ impl ServerHandler for BlenderServer {
             Ok(args) => tools::execute(&self.connection, &request.name, args).await,
             Err(error) => Err(error),
         };
+        if request.name == "get_addon_status"
+            && let Ok(CallToolResult {
+                structured_content: Some(info),
+                ..
+            }) = &result
+            && self.observe_sketchfab(info)
+        {
+            let _ = context.peer.notify_tool_list_changed().await;
+        }
         Ok(match result {
             Ok(result) => result,
             Err(error) => CallToolResult::error(vec![ContentBlock::text(format!("{error:#}"))]),

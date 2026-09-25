@@ -1,25 +1,20 @@
 [
   {
     "name": "get_addon_status",
-    "description": "Check the connected Blender version, add-on version, and capabilities before starting a task. If up_to_date is false, follow update_command and after_install.",
+    "description": "Check Blender, add-on, and protocol versions, capabilities, and runtime state, including runtime.sketchfab. Call first. If up_to_date is false, follow update_command.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
-    "inputSchema": {
-      "type": "object",
-      "properties": {},
-      "required": [],
-      "additionalProperties": false
-    }
+    "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
   },
   {
     "name": "get_blender_api_info",
-    "description": "Inspect the installed Blender RNA API before writing Python: type properties/functions or operator parameters, defaults, ranges, array shapes, pointer types, readonly/animation flags, and operator poll in the current timer context. Use kind=TYPE with identifier such as Camera, NodesModifier, or Scene; kind=OPERATOR with mesh.primitive_cube_add. query filters member identifiers case-insensitively. Follow next_offset for more members. Enum choices are static only: dynamic choices can depend on context and are not evaluated. Nested enums cap at 100, function parameters and array defaults at 64, text at 2048; details_omitted reports truncation. This inspects RNA metadata, not instance values or Python-only methods. No operator is executed.",
+    "description": "Inspect installed Blender RNA metadata before writing Python: a type's properties and functions (kind=TYPE, e.g. Camera) or an operator's parameters (kind=OPERATOR, e.g. mesh.primitive_cube_add). Reports defaults, ranges, enum items, and operator poll. Enum items are static, so context-dependent choices are missing. Does not read instance values or run operators.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
-        "identifier": {"type": "string", "minLength": 1, "description": "Exact bpy.types name or operator namespace.name, without the bpy prefix."},
+        "identifier": {"type": "string", "minLength": 1, "description": "bpy.types name or operator ID, without the bpy prefix."},
         "kind": {"type": "string", "enum": ["TYPE", "OPERATOR"], "default": "TYPE"},
-        "query": {"type": "string", "description": "Case-insensitive substring of property or function identifier."},
+        "query": {"type": "string", "description": "Case-insensitive member name substring."},
         "offset": {"type": "integer", "minimum": 0, "default": 0},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}
       },
@@ -29,84 +24,53 @@
   },
   {
     "name": "get_scene_info",
-    "description": "Inspect the active scene, mode, selection, camera, units, and a page of objects sorted by name. Defaults to 20 objects; use next_offset with the same filters to continue until null. Filters combine with AND. Pages reflect live scene state: restart at offset 0 after adding, removing, or renaming objects. Use get_object_info for full transforms, bounds, and modifiers. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
+    "description": "Inspect the active scene (mode, selection, camera, units) and a page of objects sorted by name, 20 by default. Filters combine with AND. Restart at offset 0 after adding, removing, or renaming objects.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
-        "offset": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Start index within matching objects (default 0)."
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 100,
-          "description": "Maximum objects per page (default 20)."
-        },
-        "name_filter": {
-          "type": "string",
-          "description": "Case-insensitive substring of the object name. Omit for all names."
-        },
-        "object_type": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Blender object type in uppercase, for example MESH, CURVE, EMPTY, CAMERA, or LIGHT."
-        },
-        "selected_only": {
-          "type": "boolean",
-          "description": "Only selected objects in the active view layer (default false)."
-        }
+        "offset": {"type": "integer", "minimum": 0},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+        "name_filter": {"type": "string", "description": "Case-insensitive name substring."},
+        "object_type": {"type": "string", "minLength": 1, "description": "Uppercase type, e.g. MESH, CAMERA, or LIGHT."},
+        "selected_only": {"type": "boolean"}
       },
-      "required": [],
       "additionalProperties": false
     }
   },
   {
     "name": "get_object_info",
-    "description": "Inspect an object by exact name: local transforms, world matrix and location, dimensions, parent, collections, modifiers, visibility, materials, and mesh counts/bounds. Local location and rotation are relative to the parent. rotation follows rotation_mode: Euler radians, QUATERNION [w,x,y,z], or AXIS_ANGLE [angle,x,y,z]; use matrix_world for the full world transform. Top-level mesh counts describe the base mesh; bounds and dimensions use cached object bounds. With evaluated=true, adds evaluated data for the current frame and viewport dependency graph: mesh counts after modifiers, instance sources with per-copy mesh counts, mesh_including_instances totals, and world bounds/dimensions including generated instances. Evaluated bounds enclose transformed local mesh bounds. Meshes, legacy curves, surfaces, text, and metaballs contribute mesh geometry. Native hair curves and point clouds include component counts and bounds; volume and Grease Pencil bounds are reported with unmeasured_types for missing counts. Non-mesh components remain separate from mesh totals. Bounds/dimensions are null when unavailable. Requires the object in the active view layer dependency graph. May be expensive for dense geometry. Camera objects also include projection, lens in millimetres, field-of-view angles in radians, sensor size/fit, shift, clipping, active-camera state, and depth-of-field settings. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
+    "description": "Inspect an object by exact name: local transform (rotation follows rotation_mode), matrix_world, dimensions, parent, collections, modifiers, visibility, materials, and base mesh counts and bounds. Cameras add lens, field of view, sensor, clipping, and depth of field.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
-        "object_name": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Exact object name returned by scene inspection or code execution."
-        },
-        "evaluated": {
-          "type": "boolean",
-          "description": "Include evaluated mesh counts, instance-source summaries, and bounds including instances (default false). Uses viewport modifier settings at the current frame."
-        },
-        "details": {
-          "type": "boolean",
-          "description": "Add concise material-slot, modifier-setting, and animation summaries (default false). Lists the first 20 material slots and modifiers with counts and truncation. Use get_material_info, get_node_group_info, get_modifier_info, and get_animation_info for focused inspection. Animation includes object, object data, and shape-key owners."
-        }
+        "object_name": {"type": "string", "minLength": 1},
+        "evaluated": {"type": "boolean", "description": "Add mesh counts after modifiers, instance sources, and bounds including instances at the current frame. Slow on dense geometry."},
+        "details": {"type": "boolean", "description": "Add summaries of the first 20 material slots and modifiers, and animation."}
       },
-      "required": [
-        "object_name"
-      ],
+      "required": ["object_name"],
       "additionalProperties": false
     }
   },
   {
     "name": "get_material_info",
-    "description": "Inspect a material's settings, shader nodes, socket defaults, incoming links, image references/colorspaces, color ramps, and animation overview. Nodes are sorted by name; follow node_tree.nodes.next_offset with the same material to continue. Defaults to 20 nodes. Stored socket defaults are not evaluated shader output and may be unused when linked. Nested groups are references: use get_node_group_info for their contents. Material animation and shader animation are separate; use get_animation_info with MATERIAL or MATERIAL_NODES. Settings list omitted collections and read errors. Nested details cap at 64 sockets/settings, 16 array elements, and 2048 text characters; incoming links cap at 200 per page with details_omitted when capped. Does not change frames, compile shaders, load assets, or execute drivers. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
+    "description": "Inspect a material: settings, shader nodes sorted by name (20 per page by default), stored socket defaults, incoming links, images, and animation overview. Nested node groups are references; use get_node_group_info. For animation use get_animation_info with MATERIAL or MATERIAL_NODES.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
         "material_name": {"type": "string", "minLength": 1},
-        "offset": {"type": "integer", "minimum": 0, "description": "Node page start (default 0)."},
-        "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Nodes per page (default 20)."}
+        "offset": {"type": "integer", "minimum": 0},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100}
       },
-      "required": ["material_name"], "additionalProperties": false
+      "required": ["material_name"],
+      "additionalProperties": false
     }
   },
   {
     "name": "get_node_group_info",
-    "description": "Inspect a shader or geometry node group by exact name, including its interface, node settings, sockets, incoming links, and animation overview. Nested groups stay as named references so recursive graphs cannot expand indefinitely. Follow nodes.next_offset to page nodes sorted by name. Uses the same nested-detail limits as get_material_info; interface sockets cap at 64 with details_omitted when capped. Geometry-node modifier input overrides are available from get_modifier_info. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
+    "description": "Inspect a shader or geometry node group: interface, nodes sorted by name, settings, sockets, incoming links, and animation overview. Nested groups are references. Modifier input overrides are in get_modifier_info.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -115,12 +79,13 @@
         "offset": {"type": "integer", "minimum": 0},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100}
       },
-      "required": ["node_group_name"], "additionalProperties": false
+      "required": ["node_group_name"],
+      "additionalProperties": false
     }
   },
   {
     "name": "get_modifier_info",
-    "description": "Inspect one modifier by exact object and modifier names: stack index, viewport/render flags, writable scalar/vector settings, data-block references, and one level of nested settings. Geometry Nodes includes the node-group name, input overrides, and attribute-input switches. Lists omitted collections and read errors; caps settings/inputs at 64 and arrays at 16 elements with details_omitted when capped. Reports stored values at the current frame without applying modifiers or updating the dependency graph. Use get_object_info(evaluated=true) for the resulting geometry and get_animation_info for animated modifier channels on the object. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
+    "description": "Inspect one modifier: stack index, viewport and render flags, settings, and data-block references. Geometry Nodes adds its node group and input overrides. Reports stored values; use get_object_info(evaluated=true) for the resulting geometry.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -128,321 +93,130 @@
         "object_name": {"type": "string", "minLength": 1},
         "modifier_name": {"type": "string", "minLength": 1}
       },
-      "required": ["object_name", "modifier_name"], "additionalProperties": false
+      "required": ["object_name", "modifier_name"],
+      "additionalProperties": false
     }
   },
   {
     "name": "get_animation_info",
-    "description": "Inspect animation without changing the frame or evaluating drivers. Returns the assigned action/slot and paginated entries: active-action channels, drivers, NLA tracks, strips, strip-control channels, and NLA action channels. Includes only the owner's assigned slot from shared actions, across all layers/strips. Channel summaries give paths, component indices, frame ranges, keyframe/sample counts, interpolation counts, mute/validity, and F-curve modifiers. Drivers include expression and target references; NLA strips include scene ranges, action ranges, blending, influence, and repeat/scale. Channel ranges use action-local frames; strip ranges use scene frames. Follow entries.next_offset with the same owner. Nested F-curve modifiers and driver variables cap at 20; settings cap at 64 and text at 2048 with details_omitted when capped. Does not inspect constraints, simulation caches, or evaluated motion. has_more and next_offset identify available pages; details_omitted identifies capped or unsupported details within this response. Fixed-cap nested lists have no next_offset.",
+    "description": "Inspect animation without changing the frame or evaluating drivers: the assigned action and slot, then pages of channels, drivers, and NLA tracks and strips. Channel ranges are action-local frames; strip ranges are scene frames. Excludes constraints and simulation caches.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
-        "data_name": {"type": "string", "minLength": 1, "description": "Exact object, material, world, scene, or node-group name. OBJECT_DATA and SHAPE_KEYS use the owning object's name; MATERIAL_NODES and WORLD_NODES use the material/world name."},
-        "data_type": {"type": "string", "enum": ["OBJECT", "OBJECT_DATA", "SHAPE_KEYS", "MATERIAL", "MATERIAL_NODES", "WORLD", "WORLD_NODES", "SCENE", "COMPOSITOR_NODES", "NODE_GROUP"], "description": "Animation owner (default OBJECT). COMPOSITOR_NODES uses the scene name."},
+        "data_name": {"type": "string", "minLength": 1, "description": "Owner name. OBJECT_DATA and SHAPE_KEYS take the object name; MATERIAL_NODES, WORLD_NODES, and COMPOSITOR_NODES take the material, world, or scene name."},
+        "data_type": {"type": "string", "enum": ["OBJECT", "OBJECT_DATA", "SHAPE_KEYS", "MATERIAL", "MATERIAL_NODES", "WORLD", "WORLD_NODES", "SCENE", "COMPOSITOR_NODES", "NODE_GROUP"], "description": "Default OBJECT."},
         "offset": {"type": "integer", "minimum": 0},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100}
       },
-      "required": ["data_name"], "additionalProperties": false
+      "required": ["data_name"],
+      "additionalProperties": false
     }
   },
   {
     "name": "set_camera",
-    "description": "Change camera projection, lens and sensor size (millimetres), sensor fit, depth of field, panoramic mapping, orthographic scale, shift, or clipping, and optionally make it the active scene camera. PANO supports Cycles panoramic cameras; use PERSP or ORTHO for object fitting. With object_names, fit evaluated object bounds while preserving camera orientation; padding adds a margin and fitting overrides ortho_scale. Clipping planes are not adjusted automatically. Supports perspective and orthographic fitting; mute camera constraints before fitting. Changes shared camera data. Returns camera settings and world transform. Inspect exact camera and target names first.",
+    "description": "Change a camera's projection, lens, sensor, depth of field, panorama, ortho scale, shift, or clipping, and optionally make it the scene camera. Lengths are millimetres. object_names fits evaluated bounds while keeping the camera's orientation (PERSP or ORTHO; mute camera constraints first). Changes shared camera data.",
     "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
-        "object_name": {
-          "type": "string",
-          "description": "Exact camera object name in the active scene.",
-          "minLength": 1
-        },
-        "projection": {
-          "type": "string",
-          "description": "Camera projection.",
-          "enum": [
-            "PERSP",
-            "ORTHO",
-            "PANO"
-          ]
-        },
-        "lens": {
-          "type": "number",
-          "description": "Focal length in millimetres; changes perspective camera zoom.",
-          "minimum": 1,
-          "maximum": 5000
-        },
+        "object_name": {"type": "string", "minLength": 1},
+        "projection": {"type": "string", "enum": ["PERSP", "ORTHO", "PANO"]},
+        "lens": {"type": "number", "minimum": 1, "maximum": 5000},
         "sensor_fit": {"type": "string", "enum": ["AUTO", "HORIZONTAL", "VERTICAL"]},
-        "sensor_width": {"type": "number", "minimum": 1, "maximum": 3.4028234663852886e38, "description": "Sensor width in millimetres."},
-        "sensor_height": {"type": "number", "minimum": 1, "maximum": 3.4028234663852886e38, "description": "Sensor height in millimetres."},
-        "use_dof": {"type": "boolean", "description": "Enable camera depth of field."},
-        "focus_distance": {"type": "number", "minimum": 0, "maximum": 3.4028234663852886e38, "description": "Depth of field focus distance in scene units; used when no focus object is set."},
-        "focus_object": {"type": "string", "description": "Exact scene object name to focus on, or an empty string to clear the focus object."},
-        "aperture_fstop": {"type": "number", "minimum": 0, "maximum": 3.4028234663852886e38, "description": "Depth of field aperture f-number."},
-        "panorama_type": {"type": "string", "enum": ["EQUIRECTANGULAR", "EQUIANGULAR_CUBEMAP_FACE", "MIRRORBALL", "FISHEYE_EQUIDISTANT", "FISHEYE_EQUISOLID", "FISHEYE_LENS_POLYNOMIAL", "CENTRAL_CYLINDRICAL"], "description": "Panorama mapping; requires PANO projection."},
-        "ortho_scale": {
-          "type": "number",
-          "description": "Orthographic camera scale in scene units; smaller values zoom in.",
-          "minimum": 1e-06,
-          "maximum": 1000000
-        },
-        "shift_x": {
-          "type": "number",
-          "description": "Horizontal lens shift.",
-          "minimum": -10,
-          "maximum": 10
-        },
-        "shift_y": {
-          "type": "number",
-          "description": "Vertical lens shift.",
-          "minimum": -10,
-          "maximum": 10
-        },
-        "clip_start": {
-          "type": "number",
-          "description": "Near clipping distance; must be less than clip_end.",
-          "minimum": 1e-06,
-          "maximum": 1000000
-        },
-        "clip_end": {
-          "type": "number",
-          "description": "Far clipping distance; must exceed clip_start.",
-          "minimum": 1e-06,
-          "maximum": 1000000
-        },
-        "object_names": {
-          "type": "array",
-          "description": "Exact names of objects to frame, including evaluated instances.",
-          "minItems": 1,
-          "maxItems": 1000,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "padding": {
-          "type": "number",
-          "description": "Framing margin multiplier from 1 to 10 (default 1.1).",
-          "minimum": 1,
-          "maximum": 10
-        },
-        "make_active": {
-          "type": "boolean",
-          "description": "Make this the scene camera (default false)."
-        }
+        "sensor_width": {"type": "number", "minimum": 1},
+        "sensor_height": {"type": "number", "minimum": 1},
+        "use_dof": {"type": "boolean"},
+        "focus_distance": {"type": "number", "minimum": 0, "description": "Used when focus_object is unset."},
+        "focus_object": {"type": "string", "description": "Object name, or empty to clear."},
+        "aperture_fstop": {"type": "number", "minimum": 0},
+        "panorama_type": {"type": "string", "enum": ["EQUIRECTANGULAR", "EQUIANGULAR_CUBEMAP_FACE", "MIRRORBALL", "FISHEYE_EQUIDISTANT", "FISHEYE_EQUISOLID", "FISHEYE_LENS_POLYNOMIAL", "CENTRAL_CYLINDRICAL"]},
+        "ortho_scale": {"type": "number", "minimum": 1e-06, "maximum": 1000000},
+        "shift_x": {"type": "number", "minimum": -10, "maximum": 10},
+        "shift_y": {"type": "number", "minimum": -10, "maximum": 10},
+        "clip_start": {"type": "number", "minimum": 1e-06, "maximum": 1000000},
+        "clip_end": {"type": "number", "minimum": 1e-06, "maximum": 1000000},
+        "object_names": {"type": "array", "minItems": 1, "maxItems": 1000, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "padding": {"type": "number", "minimum": 1, "maximum": 10, "description": "Framing margin multiplier, default 1.1."},
+        "make_active": {"type": "boolean"}
       },
-      "required": [
-        "object_name"
-      ],
+      "required": ["object_name"],
       "additionalProperties": false
     }
   },
   {
     "name": "set_viewport",
-    "description": "Inspect or change a 3D viewport. Omit settings to inspect its current state. Set view direction, projection, shading, overlays, gizmos, or zoom. Frame ALL visible objects, SELECTED visible objects, or exact object_names, including evaluated instances. Framing preserves selection and exits camera view; it cannot be combined with distance. Axis views default to orthographic and ISO to perspective. CAMERA uses the viewport camera and accepts camera_zoom for display zoom; use set_camera to change the actual camera lens or fit its composition. Requires a Blender window with a single-view 3D viewport.",
+    "description": "Inspect or change a single-view 3D viewport; omit settings to inspect. Sets view, projection, shading, overlays, gizmos, and zoom, or frames ALL, SELECTED, or named objects. Framing keeps selection, exits camera view, and excludes distance. Axis views default to orthographic. camera_zoom only changes the CAMERA view display; use set_camera for the lens.",
     "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
-        "viewport_index": {
-          "type": "integer",
-          "description": "3D viewport index across windows, current window first (default 0). Quad view is unsupported.",
-          "minimum": 0
-        },
-        "view": {
-          "type": "string",
-          "description": "View direction or camera view.",
-          "enum": [
-            "FRONT",
-            "BACK",
-            "LEFT",
-            "RIGHT",
-            "TOP",
-            "BOTTOM",
-            "ISO",
-            "CAMERA"
-          ]
-        },
-        "projection": {
-          "type": "string",
-          "description": "Viewport projection, incompatible with view=CAMERA.",
-          "enum": [
-            "PERSP",
-            "ORTHO"
-          ]
-        },
-        "frame": {
-          "type": "string",
-          "description": "Objects to frame; cannot be combined with object_names.",
-          "enum": [
-            "ALL",
-            "SELECTED"
-          ]
-        },
-        "object_names": {
-          "type": "array",
-          "description": "Exact names of objects to frame, including evaluated instances.",
-          "minItems": 1,
-          "maxItems": 1000,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "padding": {
-          "type": "number",
-          "description": "Framing margin multiplier from 1 to 10 (default 1.1).",
-          "minimum": 1,
-          "maximum": 10
-        },
-        "distance": {
-          "type": "number",
-          "description": "Absolute distance from the viewport pivot; unavailable in camera view.",
-          "minimum": 1e-06,
-          "maximum": 1000000
-        },
-        "camera_zoom": {
-          "type": "number",
-          "description": "Blender camera-view display zoom from -30 to 600; 0 is the default. Does not change rendered composition.",
-          "minimum": -30,
-          "maximum": 600
-        },
-        "shading": {
-          "type": "string",
-          "description": "Viewport shading mode.",
-          "enum": [
-            "WIREFRAME",
-            "SOLID",
-            "MATERIAL",
-            "RENDERED"
-          ]
-        },
-        "overlays": {
-          "type": "boolean",
-          "description": "Show viewport overlays."
-        },
-        "gizmos": {
-          "type": "boolean",
-          "description": "Show viewport gizmos."
-        }
+        "viewport_index": {"type": "integer", "minimum": 0, "description": "Across windows, current window first."},
+        "view": {"type": "string", "enum": ["FRONT", "BACK", "LEFT", "RIGHT", "TOP", "BOTTOM", "ISO", "CAMERA"]},
+        "projection": {"type": "string", "enum": ["PERSP", "ORTHO"]},
+        "frame": {"type": "string", "enum": ["ALL", "SELECTED"]},
+        "object_names": {"type": "array", "minItems": 1, "maxItems": 1000, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "padding": {"type": "number", "minimum": 1, "maximum": 10, "description": "Framing margin multiplier, default 1.1."},
+        "distance": {"type": "number", "minimum": 1e-06, "maximum": 1000000, "description": "Distance from the view pivot."},
+        "camera_zoom": {"type": "number", "minimum": -30, "maximum": 600},
+        "shading": {"type": "string", "enum": ["WIREFRAME", "SOLID", "MATERIAL", "RENDERED"]},
+        "overlays": {"type": "boolean"},
+        "gizmos": {"type": "boolean"}
       },
-      "required": [],
       "additionalProperties": false
     }
   },
   {
     "name": "get_viewport_screenshot",
-    "description": "Capture a 3D viewport as an image with dimensions, capture method, and viewport settings. Requires a Blender window with a single-view 3D viewport. Use set_viewport to frame objects and choose shading. With camera_only=true, capture the active scene camera frame using viewport shading and render pixel aspect; supports PERSP and ORTHO cameras. This is a viewport preview; use render jobs for final camera renders. Camera capture leaves the displayed view unchanged and requires offscreen capture; normal viewport capture can fall back to a window grab.",
+    "description": "Capture a single-view 3D viewport as an image. This is a preview, not a render; frame and shade with set_viewport first. camera_only=true captures the active camera's frame (PERSP or ORTHO) without changing the view.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
-        "max_size": {
-          "type": "integer",
-          "description": "Maximum pixel size of the largest image dimension.",
-          "default": 1000,
-          "minimum": 1,
-          "maximum": 4096
-        },
-        "viewport_index": {
-          "type": "integer",
-          "description": "3D viewport index across windows, current window first (default 0). Quad view is unsupported.",
-          "minimum": 0
-        },
-        "camera_only": {
-          "type": "boolean",
-          "description": "Capture only the active scene camera frame (default false)."
-        }
+        "max_size": {"type": "integer", "minimum": 1, "maximum": 4096, "default": 1000, "description": "Longest side in pixels."},
+        "viewport_index": {"type": "integer", "minimum": 0},
+        "camera_only": {"type": "boolean"}
       },
-      "required": [],
       "additionalProperties": false
     }
   },
   {
     "name": "execute_blender_code",
-    "description": "Execute Python on Blender's main thread with bpy already available. Prefer bpy.data for edits; bpy.ops can require mode, selection, or context overrides. Print concise results; stdout/stderr are limited to 16,384 characters each. Results include started and succeeded. partial_changes is true when a failed script changed inspected objects, false when code did not start or succeeded, and null when a failed script may have effects outside inspection. Errors include traceback and output; changes are not rolled back. Optional checkpoint saves a .blend copy before execution. summarize_changes returns the first 100 changes per category; use get_execution_changes for remaining pages. Either option adds an execution_id retrievable with get_execution_result, including preparation failures. A timeout does not cancel execution: inspect before retrying. Without namespace, globals are fresh each call. A task-specific namespace preserves globals until reset, file loading, undo/redo, checkpoint restoration, or server restart. Namespaces separate globals only; Blender data and imported modules are shared.",
+    "description": "Run Python on Blender's main thread with bpy imported. Prefer bpy.data; bpy.ops can need mode, selection, or context overrides. Print results; stdout and stderr each keep 16,384 characters. Errors are not rolled back: check started, succeeded, and partial_changes (null means effects outside inspection are possible). A timeout does not stop execution, so inspect before retrying. checkpoint or summarize_changes adds an execution_id for get_execution_result.",
     "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": true},
     "inputSchema": {
       "type": "object",
       "properties": {
-        "code": {
-          "type": "string",
-          "description": "Python statements to execute. Use print(...) to return values; empty code is allowed for namespace reset."
-        },
-        "namespace": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128,
-          "description": "Unique task ID for persistent globals. Anyone using the same ID shares its globals."
-        },
-        "reset_namespace": {
-          "type": "boolean",
-          "description": "Clear this namespace before executing code; requires namespace when true. Use empty code to release stored variables when finished."
-        },
-        "checkpoint": {
-          "type": "boolean",
-          "description": "Save a checkpoint before running code (default false). Requires Object mode and a free checkpoint slot; if saving fails, code does not run. Returns checkpoint metadata on success or failure. Does not roll back automatically. External files and Python state are not saved."
-        },
-        "summarize_changes": {
-          "type": "boolean",
-          "description": "Compare objects before and after execution (default false). Requires Object mode initially; reports summary_error if the final state cannot be inspected. Covers writable object/data properties, relationships, modifier/constraint settings, material slots, and base mesh positions/topology. Excludes shader contents, animation, mesh attributes, scene settings, external files, and Python state. Full counts with the first 100 names per category; use get_execution_changes for more. Visibility is compared across all scene view layers. Scans all objects and mesh geometry, which can be costly."
-        }
+        "code": {"type": "string", "description": "Use print() to return values. May be empty when resetting a namespace."},
+        "namespace": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Unique task ID. Its globals persist until reset, file load, undo/redo, or server restart. Blender data and modules are shared."},
+        "reset_namespace": {"type": "boolean", "description": "Clear the namespace first. Send empty code to release it."},
+        "checkpoint": {"type": "boolean", "description": "Save a checkpoint first; requires Object mode. Code does not run if saving fails."},
+        "summarize_changes": {"type": "boolean", "description": "Report created, changed, and removed objects, first 100 each. Covers object and data properties, modifiers, constraints, materials, and base meshes; not shaders, animation, or scene settings. Requires Object mode and scans all objects."}
       },
-      "required": [
-        "code"
-      ],
+      "required": ["code"],
       "additionalProperties": false,
-      "if": {
-        "properties": {"reset_namespace": {"const": true}},
-        "required": ["reset_namespace"]
-      },
+      "if": {"properties": {"reset_namespace": {"const": true}}, "required": ["reset_namespace"]},
       "then": {"required": ["namespace"]}
     }
   },
   {
-    "name": "create_checkpoint",
-    "description": "Save a persistent .blend checkpoint without overwriting or changing the current document path. Requires Object mode. Stores up to 32 checkpoints in the Blender MCP config directory; use list_checkpoints and delete_checkpoint to manage them. External assets must already be saved on disk; linked files, caches, external side effects, and Python state are not copied. Save failures prevent execution when requested through execute_blender_code.",
-    "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
-    "inputSchema": {
-      "type": "object",
-      "properties": {"label": {"type": "string", "minLength": 1, "maxLength": 128}},
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "list_checkpoints",
-    "description": "List saved checkpoint IDs, labels, timestamps, original file paths, file sizes, and object counts. Checkpoints persist across Blender restarts. Restored working copies are separate files and are not listed or deleted by checkpoint management.",
-    "annotations": {"readOnlyHint": true, "openWorldHint": false},
-    "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
-  },
-  {
-    "name": "restore_checkpoint",
-    "description": "Replace the open Blender document with a working copy of a checkpoint. First saves the current document as a safety checkpoint; requires Object mode and one free checkpoint slot. Clears all execution namespaces. Preserves the current UI, disables file Python auto-execution, and keeps MCP connected. The working copy becomes the current file path; use Save As to save elsewhere. Original files and checkpoint snapshots remain intact. Does not undo external file/network effects, running render jobs, or Python callbacks. Refuses a checkpoint whose saved checksum changed.",
+    "name": "checkpoints",
+    "description": "Manage up to 32 .blend checkpoints that persist across restarts. create saves the open file without changing its path; list returns IDs, labels, and times; delete removes one permanently. restore saves a safety checkpoint, opens a working copy of the checkpoint, and clears all namespaces; it does not undo external effects, render jobs, or callbacks. create and restore require Object mode. Linked files, caches, and Python state are not saved.",
     "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
-      "properties": {"checkpoint_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
-      "required": ["checkpoint_id"],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "delete_checkpoint",
-    "description": "Permanently remove one checkpoint snapshot and its metadata to free storage. Does not change the open scene or remove restored working copies. Refuses to delete a snapshot opened directly as the current file.",
-    "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false},
-    "inputSchema": {
-      "type": "object",
-      "properties": {"checkpoint_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
-      "required": ["checkpoint_id"],
+      "properties": {
+        "action": {"type": "string", "enum": ["create", "list", "restore", "delete"]},
+        "label": {"type": "string", "minLength": 1, "maxLength": 128, "description": "create only."},
+        "checkpoint_id": {"type": "string", "pattern": "^[0-9a-f]{32}$", "description": "restore and delete only."}
+      },
+      "required": ["action"],
       "additionalProperties": false
     }
   },
   {
     "name": "get_execution_result",
-    "description": "Retrieve a completed execute_blender_code result that used checkpoint or summarize_changes, including preparation or script errors, started, succeeded, partial_changes, output, checkpoint, and initial change pages. Omit execution_id for the latest opted-in result, which can belong to another client: verify namespace and code_sha256. Use get_execution_changes with this execution_id to retrieve additional changes. The last eight results and their full change lists are retained until the add-on server stops. After a timeout, retrieve and inspect before retrying; this command waits behind running Python and does not cancel it. A successful retrieval can contain succeeded=false from the original execution.",
+    "description": "Retrieve an execute_blender_code result that used checkpoint or summarize_changes, including after a timeout; waits for running Python. Omit execution_id for the latest, which may belong to another client, so check namespace and code_sha256. Keeps eight results until the add-on stops.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
@@ -451,33 +225,48 @@
     }
   },
   {
+    "name": "get_execution_changes",
+    "description": "Page through one category of object changes from an execute_blender_code call with summarize_changes=true.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": false},
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "execution_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "category": {"type": "string", "enum": ["created", "changed", "removed"]},
+        "offset": {"type": "integer", "minimum": 0, "default": 0},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 100}
+      },
+      "required": ["execution_id", "category"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "start_render",
-    "description": "Render one still frame from a snapshot in a separate Blender process. Returns a job_id immediately after the snapshot is written; poll get_render_status, then use get_render_image to preview or export_render to save the full-resolution PNG. Uses the scene's render settings without changing the open scene, including camera-free compositor or video-sequencer output. Optional resolution_percentage applies only to this job. Only one job can run at a time. Referenced images with unsaved pixel edits must be saved or packed first. External assets and caches must be saved on disk; Python auto-execution and compositor file-output nodes are disabled in the worker. The latest eight jobs are retained until the add-on server stops. A client timeout does not cancel a job; call get_render_status without job_id to find the latest job before retrying.",
+    "description": "Render one still frame from a scene snapshot in a separate Blender process, leaving the open scene unchanged. Returns job_id; poll get_render_status, then use get_render_image or export_render. One job runs at a time. Save or pack edited images first. A client timeout does not cancel the job; check get_render_status before retrying.",
     "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
-        "scene_name": {"type": "string", "minLength": 1, "description": "Exact scene name. Omit for the active scene."},
-        "frame": {"type": "integer", "minimum": -1048574, "maximum": 1048574, "description": "Frame to render. Omit for the scene's current frame."},
-        "resolution_percentage": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Override the scene's resolution percentage for this job only."}
+        "scene_name": {"type": "string", "minLength": 1, "description": "Default: active scene."},
+        "frame": {"type": "integer", "minimum": -1048574, "maximum": 1048574, "description": "Default: current frame."},
+        "resolution_percentage": {"type": "integer", "minimum": 1, "maximum": 100}
       },
-      "required": [],
       "additionalProperties": false
     }
   },
   {
     "name": "start_animation_render",
-    "description": "Render a PNG animation sequence from an immutable scene snapshot in a separate Blender process. output_directory must be a new absolute directory whose parent exists. Defaults to the scene's start, end, and step; the end is inclusive and the range may contain at most 10000 frames. Returns job_id and output_directory after saving the snapshot. Poll get_render_status, preview or export completed frames with get_render_image or export_render, and use cancel_render to stop. Frames are published atomically under frames/frame_0000001.png. The snapshot, frame checksums, and outputs survive cancellation, server restart, and job eviction; use resume_animation_render with the same directory to continue. Only one still or animation job can run per server. Uses saved camera cuts and render settings without changing the open scene. Referenced images with unsaved pixel edits must be saved or packed first. External assets and caches must remain unchanged on disk for reproducible frames; auto-execution and compositor file-output nodes are disabled. Produces a PNG sequence, not an encoded video or audio track. A client timeout does not cancel the job; inspect get_render_status before retrying.",
+    "description": "Render a PNG sequence (no video or audio) from a scene snapshot in a separate Blender process. Frame settings default to the scene's; at most 10000 frames. Writes output_directory/frames/frame_0000001.png and so on. Poll get_render_status. Output survives cancellation and restarts; continue with resume_animation_render. One job runs at a time. Save or pack edited images first; keep external assets and caches unchanged.",
     "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
-        "output_directory": {"type": "string", "minLength": 1, "description": "New absolute output directory on the Blender machine. A leading ~ is expanded. Existing directories are refused."},
-        "scene_name": {"type": "string", "minLength": 1, "description": "Exact scene name. Omit for the active scene."},
-        "frame_start": {"type": "integer", "minimum": -1048574, "maximum": 1048574, "description": "First frame. Omit for the scene's frame_start."},
-        "frame_end": {"type": "integer", "minimum": -1048574, "maximum": 1048574, "description": "Inclusive last frame bound. Must be at least frame_start. Omit for the scene's frame_end."},
-        "frame_step": {"type": "integer", "minimum": 1, "maximum": 1048574, "description": "Frame increment. Omit for the scene's frame_step."},
-        "resolution_percentage": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Override resolution percentage for this snapshot only."}
+        "output_directory": {"type": "string", "minLength": 1, "description": "New absolute directory on the Blender machine with an existing parent."},
+        "scene_name": {"type": "string", "minLength": 1},
+        "frame_start": {"type": "integer", "minimum": -1048574, "maximum": 1048574},
+        "frame_end": {"type": "integer", "minimum": -1048574, "maximum": 1048574, "description": "Inclusive."},
+        "frame_step": {"type": "integer", "minimum": 1, "maximum": 1048574},
+        "resolution_percentage": {"type": "integer", "minimum": 1, "maximum": 100}
       },
       "required": ["output_directory"],
       "additionalProperties": false
@@ -485,220 +274,111 @@
   },
   {
     "name": "resume_animation_render",
-    "description": "Resume an animation job from its output_directory, including after cancellation, failure, server restart, or job eviction. Verifies the original scene snapshot and skips frames only when their saved size, dimensions, and SHA-256 match. Missing, partial, or changed frames are rendered again. Uses the original frame range, camera cuts, resolution, and scene snapshot; current scene edits are not included. Returns the original job_id with a new attempt. A directory already used by a worker is refused. All-complete jobs are verified without rendering again. Saved external assets must still be available. Poll get_render_status; elapsed_seconds measures the current attempt.",
+    "description": "Resume an animation render after cancellation, failure, or restart. Renders only missing or changed frames from the original snapshot; later scene edits are excluded.",
     "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
-      "properties": {
-        "output_directory": {"type": "string", "minLength": 1, "description": "Absolute directory returned by start_animation_render. A leading ~ is expanded."}
-      },
+      "properties": {"output_directory": {"type": "string", "minLength": 1}},
       "required": ["output_directory"],
       "additionalProperties": false
     }
   },
   {
     "name": "get_render_status",
-    "description": "Get a still or animation job's state, phase, elapsed time, scene, frame, image availability, and progress. States are running, cancelling, completed, cancelled, and failed. progress is null until engine statistics arrive; samples_completed, samples_total, sample_fraction, and remaining_seconds describe only the current sampling stage and can reset between layers or frames. Animation jobs also return output_directory, frame_start/end/step, frames_total, frames_completed, frame_fraction, last_completed_frame, fps (sequence playback rate including frame_step), and remaining_frames_seconds (an estimate from frames rendered this attempt). frame is the current frame; during startup it is the first requested frame. Animation images remain available after cancellation or failure. Unavailable estimates are null. A failed job includes error_message. Omit job_id for the latest job. In-memory handles expire on server stop or after eight newer jobs; resume_animation_render reloads durable animation output. elapsed_seconds measures the current attempt.",
+    "description": "Get a render job's state (running, cancelling, completed, cancelled, or failed), phase, frame, progress, and error_message. Sample progress covers only the current sampling stage. Animation jobs add frame counts, fps, and estimates. Omit job_id for the latest job. Handles expire on server stop or after eight newer jobs.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
-      "properties": {
-        "job_id": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Job ID returned by start_render. Omit for the latest job."}
-      },
-      "required": [],
+      "properties": {"job_id": {"type": "string", "minLength": 1, "maxLength": 128}},
       "additionalProperties": false
     }
   },
   {
     "name": "cancel_render",
-    "description": "Request cancellation of one still or animation worker without interrupting the open Blender scene. Returns its current status; poll get_render_status until cancelled. Repeated requests are safe. A job that already finished keeps its terminal state. Completed animation frames and the scene snapshot are retained; use resume_animation_render to continue. An interrupted frame is rendered again. Stopping the add-on also stops its render worker.",
+    "description": "Request cancellation of a render job; poll get_render_status until cancelled. Completed animation frames are kept.",
     "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
-      "properties": {
-        "job_id": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Exact job ID returned by start_render."}
-      },
+      "properties": {"job_id": {"type": "string", "minLength": 1, "maxLength": 128}},
       "required": ["job_id"],
       "additionalProperties": false
     }
   },
   {
     "name": "get_render_image",
-    "description": "Return a saved render as a PNG image with job metadata, returned dimensions, and source dimensions. Stills require a completed job. For animation jobs, choose a completed frame or omit frame for the highest completed frame; previews also work while running or after cancellation or failure. Verifies the animation frame checksum before reading. Scales down to max_size without changing the saved original. Expired job handles require resume_animation_render before access.",
+    "description": "Return a render as a PNG scaled to max_size. Animation frames are available while running and after cancellation or failure.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
-        "job_id": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Exact job ID returned by start_render."},
-        "max_size": {"type": "integer", "minimum": 1, "maximum": 4096, "default": 1000, "description": "Maximum pixel size of the largest returned image dimension."},
-        "frame": {"type": "integer", "minimum": -1048574, "maximum": 1048574, "description": "Completed animation frame to retrieve. Omit for the highest completed frame. For still jobs, must match the rendered frame."}
+        "job_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "max_size": {"type": "integer", "minimum": 1, "maximum": 4096, "default": 1000},
+        "frame": {"type": "integer", "minimum": -1048574, "maximum": 1048574, "description": "Default: latest completed frame. Stills must match."}
       },
       "required": ["job_id"],
       "additionalProperties": false
     }
   },
   {
-    "name": "get_sketchfab_status",
-    "description": "Check if Sketchfab integration is enabled in Blender.\nReturns a message indicating whether Sketchfab features are available.",
-    "annotations": {"readOnlyHint": true, "openWorldHint": true},
+    "name": "export_render",
+    "description": "Save a render as a full-resolution PNG on the Blender machine. Returns filepath, dimensions, size_bytes, and sha256.",
+    "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
-      "properties": {},
-      "required": [],
+      "properties": {
+        "job_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "filepath": {"type": "string", "minLength": 1, "description": "Absolute .png path with an existing parent."},
+        "overwrite": {"type": "boolean", "default": false},
+        "frame": {"type": "integer", "minimum": -1048574, "maximum": 1048574, "description": "Default: latest completed frame. Stills must match."}
+      },
+      "required": ["job_id", "filepath"],
       "additionalProperties": false
     }
   },
   {
+    "name": "get_sketchfab_status",
+    "description": "Check whether Sketchfab is enabled and has an API key.",
+    "annotations": {"readOnlyHint": true, "openWorldHint": true},
+    "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
+  },
+  {
     "name": "search_sketchfab_models",
-    "description": "Search for models on Sketchfab with optional filtering.\n\nParameters:\n- query: Text to search for\n- categories: Optional comma-separated list of categories\n- count: Maximum number of results to return (default 20)\n- downloadable: Whether to include only downloadable models (default True)\n\nReturns a formatted list of matching models.",
+    "description": "Search Sketchfab models.",
     "annotations": {"readOnlyHint": true, "openWorldHint": true},
     "inputSchema": {
       "type": "object",
       "properties": {
-        "query": {
-          "type": "string"
-        },
-        "categories": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "count": {
-          "type": "integer",
-          "default": 20
-        },
-        "downloadable": {
-          "type": "boolean",
-          "default": true
-        }
+        "query": {"type": "string"},
+        "categories": {"type": ["string", "null"], "default": null, "description": "Comma-separated."},
+        "count": {"type": "integer", "default": 20},
+        "downloadable": {"type": "boolean", "default": true}
       },
-      "required": [
-        "query"
-      ],
+      "required": ["query"],
       "additionalProperties": false
     }
   },
   {
     "name": "get_sketchfab_model_preview",
-    "description": "Get a preview thumbnail of a Sketchfab model by its UID.\nUse this to visually confirm a model before downloading.\n\nParameters:\n- uid: The unique identifier of the Sketchfab model (obtained from search_sketchfab_models)\n\nReturns the model's thumbnail as an Image for visual confirmation.",
+    "description": "Get a Sketchfab model's thumbnail to check it before downloading.",
     "annotations": {"readOnlyHint": true, "openWorldHint": true},
     "inputSchema": {
       "type": "object",
-      "properties": {
-        "uid": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "uid"
-      ],
+      "properties": {"uid": {"type": "string"}},
+      "required": ["uid"],
       "additionalProperties": false
     }
   },
   {
     "name": "download_sketchfab_model",
+    "description": "Download and import a Sketchfab model, scaled so its largest dimension equals target_size. Returns object names, dimensions, and bounds. Credit the author as its license requires.",
     "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true},
-    "description": "Download and import a Sketchfab model by its UID.\nThe model will be scaled so its largest dimension equals target_size.\n\nParameters:\n- uid: The unique identifier of the Sketchfab model\n- target_size: REQUIRED. The target size in Blender units/meters for the largest dimension.\n              You must specify the desired size for the model.\n              Examples:\n              - Chair: target_size=1.0 (1 meter tall)\n              - Table: target_size=0.75 (75cm tall)\n              - Car: target_size=4.5 (4.5 meters long)\n              - Person: target_size=1.7 (1.7 meters tall)\n              - Small object (cup, phone): target_size=0.1 to 0.3\n\nReturns JSON with import details including object names, dimensions, and bounding box.\nThe model must be downloadable and you must have proper access rights.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "uid": {
-          "type": "string"
-        },
-        "target_size": {
-          "type": "number",
-          "exclusiveMinimum": 0
-        }
+        "uid": {"type": "string"},
+        "target_size": {"type": "number", "exclusiveMinimum": 0, "description": "Metres, e.g. chair 1.0, person 1.7, cup 0.15."}
       },
-      "required": [
-        "uid",
-        "target_size"
-      ],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "export_render",
-    "description": "Save a full-resolution PNG on the Blender machine. Stills require a completed job. For animation jobs, choose a completed frame or omit frame for the highest completed frame; export also works while running or after cancellation or failure. Copies original bytes without resizing or changing the open scene. The destination parent must exist and must be outside managed render storage. Refuses existing paths unless overwrite=true; publication is atomic. Returns filepath, dimensions, size_bytes, and sha256. Exported files survive job expiry and server restart.",
-    "annotations": {
-      "readOnlyHint": false,
-      "destructiveHint": true,
-      "idempotentHint": true,
-      "openWorldHint": false
-    },
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "job_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128,
-          "description": "Exact job ID returned by start_render."
-        },
-        "filepath": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Absolute destination path ending in .png on the Blender machine. A leading ~ is expanded."
-        },
-        "overwrite": {
-          "type": "boolean",
-          "default": false,
-          "description": "Replace an existing destination file (default false)."
-        },
-        "frame": {
-          "type": "integer",
-          "minimum": -1048574,
-          "maximum": 1048574,
-          "description": "Completed animation frame to export. Omit for the highest completed frame. For still jobs, must match the rendered frame."
-        }
-      },
-      "required": [
-        "job_id",
-        "filepath"
-      ],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "get_execution_changes",
-    "description": "Page through the complete, immutable object changes captured by an execute_blender_code call with summarize_changes=true, including failed scripts. Requires its exact execution_id and one category: created, changed, or removed. Follow changes.next_offset while changes.has_more is true. Lists use the same stable name/library ordering as the initial summary. Results expire with the execution result after eight newer opted-in calls or a server stop. Reports an error if the execution has no successful change summary. Inspection scope is returned with each page.",
-    "annotations": {
-      "readOnlyHint": true,
-      "openWorldHint": false
-    },
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "execution_id": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{32}$"
-        },
-        "category": {
-          "type": "string",
-          "enum": [
-            "created",
-            "changed",
-            "removed"
-          ]
-        },
-        "offset": {
-          "type": "integer",
-          "minimum": 0,
-          "default": 0
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 100,
-          "default": 100
-        }
-      },
-      "required": [
-        "execution_id",
-        "category"
-      ],
+      "required": ["uid", "target_size"],
       "additionalProperties": false
     }
   }
