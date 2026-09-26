@@ -28,7 +28,15 @@ def _install_bpy_stubs(monkeypatch, scene=None, selected_objects=()):
         preferences=types.SimpleNamespace(addons={}),
     )
     bpy.data = types.SimpleNamespace(filepath="", is_saved=False, is_dirty=False)
+    undo_steps = []
+
+    def undo_push(message=""):
+        undo_steps.append(message)
+        bpy.data.is_dirty = True
+        return {"FINISHED"}
+
     bpy.ops = types.SimpleNamespace(
+        ed=types.SimpleNamespace(undo_push=undo_push, undo_steps=undo_steps),
         import_scene=types.SimpleNamespace(gltf=_unexpected_import),
         wm=types.SimpleNamespace(obj_import=_unexpected_import),
     )

@@ -208,11 +208,12 @@ def test_preview_selects_medium_thumbnail_without_sending_credentials_to_asset_h
 def test_download_rejects_archive_traversal_and_removes_temporary_files(
     addon, monkeypatch, tmp_path, entry
 ):
-    service, module, _ = sketchfab_service(addon)
+    service, module, bpy = sketchfab_service(addon)
     local_download(monkeypatch, module, tmp_path, archive_bytes({entry: "{}"}))
     result = service.download_sketchfab_model("model")
     assert "Security issue: Zip contains files" in result["error"]
     assert list(tmp_path.iterdir()) == []
+    assert bpy.ops.ed.undo_steps == []
 
 
 def test_failed_import_removes_temporary_files(addon, monkeypatch, tmp_path):
@@ -229,6 +230,7 @@ def test_failed_import_removes_temporary_files(addon, monkeypatch, tmp_path):
         "error": "Failed to download model: import failed"
     }
     assert list(tmp_path.iterdir()) == []
+    assert bpy.ops.ed.undo_steps == ["MCP: Import Sketchfab Model"]
 
 
 def test_download_normalizes_only_roots_and_recalculates_combined_bounds(
@@ -286,6 +288,7 @@ def test_download_normalizes_only_roots_and_recalculates_combined_bounds(
     assert mesh.scale == (1, 1, 1)
     assert updates == [True, True]
     assert list(tmp_path.iterdir()) == []
+    assert bpy.ops.ed.undo_steps == ["MCP: Import Sketchfab Model"]
 
 
 def test_cancelled_import_does_not_report_or_normalize_existing_selection(addon):
@@ -311,6 +314,7 @@ def test_import_bounds_ignore_empty_meshes(addon, monkeypatch):
 def test_invalid_normalization_size_is_rejected_before_import(addon, size):
     with pytest.raises(addon.sketchfab.SketchfabError, match="positive finite"):
         addon.sketchfab._import_archive(b"", True, size)
+    assert addon.sketchfab.bpy.ops.ed.undo_steps == []
 
 
 def test_nested_archive_and_multiple_root_offsets_are_normalized(addon, monkeypatch):

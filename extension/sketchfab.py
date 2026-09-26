@@ -15,7 +15,7 @@ import bpy
 import requests
 from mathutils import Vector
 
-from .context import current_view_layer
+from .context import current_view_layer, push_undo_step
 from .geometry import Bounds, world_bounding_box
 
 logger = logging.getLogger(__name__)
@@ -104,13 +104,20 @@ def _import_archive(
         )
         if main_file is None:
             raise SketchfabError("No glTF file found in the downloaded model")
-        existing = {obj.session_uid for obj in bpy.data.objects}
-        status = bpy.ops.import_scene.gltf(
-            filepath=str(main_file), import_pack_images=True
-        )
-        if status != {"FINISHED"}:
-            raise SketchfabError("Blender cancelled the glTF import")
-        imported = [obj for obj in bpy.data.objects if obj.session_uid not in existing]
+        try:
+            return _import_model(main_file, normalize_size, target_size)
+        finally:
+            push_undo_step("MCP: Import Sketchfab Model")
+
+
+def _import_model(
+    main_file: Path, normalize_size: bool, target_size: float
+) -> dict[str, object]:
+    existing = {obj.session_uid for obj in bpy.data.objects}
+    status = bpy.ops.import_scene.gltf(filepath=str(main_file), import_pack_images=True)
+    if status != {"FINISHED"}:
+        raise SketchfabError("Blender cancelled the glTF import")
+    imported = [obj for obj in bpy.data.objects if obj.session_uid not in existing]
 
     roots = [obj for obj in imported if obj.parent is None]
     meshes = []

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, cast
 
 import bpy
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
 
@@ -26,3 +29,10 @@ def current_view_layer() -> bpy.types.ViewLayer:
     if layer is None:
         raise RuntimeError("No active Blender view layer")
     return layer
+
+
+def push_undo_step(message: str) -> None:
+    try:
+        bpy.ops.ed.undo_push(message=message)
+    except Exception:
+        logger.exception("Could not push the %r undo step", message)

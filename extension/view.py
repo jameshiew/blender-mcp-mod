@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, cast
 import bpy
 from mathutils import Vector
 
-from .context import current_scene, current_view_layer
+from .context import current_scene, current_view_layer, push_undo_step
 from .geometry import evaluated_geometry
 
 if TYPE_CHECKING:
@@ -287,6 +287,7 @@ def set_camera(
     if make_active:
         current_scene().camera = obj
     current_view_layer().update()
+    push_undo_step("MCP: Set Camera")
     return {
         "object_name": obj.name,
         "camera": camera_info(obj),

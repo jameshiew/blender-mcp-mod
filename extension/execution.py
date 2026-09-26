@@ -14,7 +14,7 @@ import bpy
 
 from . import recovery
 from .connection import config_directory
-from .context import current_scene
+from .context import current_scene, push_undo_step
 from .recovery import Checkpoint, CheckpointList, Checkpoints, ObjectChange
 
 logger = logging.getLogger(__name__)
@@ -74,6 +74,7 @@ class ExecutionSession:
         self._execution_results: dict[str, ExecutionResult] = {}
         self._execution_changes: dict[str, dict[str, list[ObjectChange]]] = {}
         self._checkpoints: Checkpoints | None = None
+        self._namespace_resets = 0
 
     def close(self) -> None:
         self.clear_namespaces()
@@ -82,6 +83,7 @@ class ExecutionSession:
 
     def clear_namespaces(self) -> None:
         self._execution_namespaces.clear()
+        self._namespace_resets += 1
 
     def _checkpoint_store(self) -> Checkpoints:
         if self._checkpoints is None:
@@ -165,6 +167,7 @@ class ExecutionSession:
             code_sha256 = hashlib.sha256(code.encode()).hexdigest()
         before = saved = None
         started = False
+        namespace_resets = self._namespace_resets
         stdout = BoundedOutput()
         stderr = BoundedOutput()
         result: ExecutionResult
@@ -221,6 +224,8 @@ class ExecutionSession:
                 "result": stdout.getvalue(),
                 "error_message": message,
             }
+        if started and self._namespace_resets == namespace_resets:
+            push_undo_step("MCP: Run Code")
         if stderr.getvalue():
             result["stderr"] = stderr.getvalue()
         if stdout.truncated or stderr.truncated:

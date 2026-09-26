@@ -270,3 +270,40 @@ def test_namespace_reset_flag_must_be_boolean(server_class):
         server_class().execution.execute_code(
             "pass", namespace="task", reset_namespace=1
         )
+
+
+def test_started_code_marks_the_file_modified_with_one_undo_step(addon):
+    server = addon.server.BlenderMCPServer()
+    bpy = addon.server.bpy
+    execute(server, "def broken(:")
+    assert bpy.ops.ed.undo_steps == [] and not bpy.data.is_dirty
+    execute(server, "values = [1]")
+    execute(server, "raise ValueError('partial')")
+    assert bpy.ops.ed.undo_steps == ["MCP: Run Code", "MCP: Run Code"]
+    assert bpy.data.is_dirty
+
+
+def test_code_that_moves_undo_history_or_loads_a_file_adds_no_undo_step(addon):
+    server = addon.server.BlenderMCPServer()
+    bpy = addon.server.bpy
+    bpy.ops.ed.undo = server.execution.clear_namespaces
+    assert execute(server, "bpy.ops.ed.undo()")["result"]["succeeded"]
+    assert bpy.ops.ed.undo_steps == []
+    execute(server, "pass")
+    assert bpy.ops.ed.undo_steps == ["MCP: Run Code"]
+
+
+def test_undo_step_failure_does_not_fail_execution(addon):
+    server = addon.server.BlenderMCPServer()
+    bpy = addon.server.bpy
+
+    def fail(**_kwargs):
+        raise RuntimeError("Operator bpy.ops.ed.undo_push.poll() failed")
+
+    bpy.ops.ed.undo_push = fail
+    assert execute(server, "print('done')")["result"] == {
+        "started": True,
+        "succeeded": True,
+        "partial_changes": False,
+        "result": "done\n",
+    }

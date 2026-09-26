@@ -239,7 +239,8 @@ addon_utils.enable(name, default_set=True)
 addon = sys.modules[name]
 assert addon.preferences.get_preferences() is not None
 assert addon.ui.BLENDERMCP_AddonPreferences.bl_idname == name
-info = addon.server.BlenderMCPServer().get_addon_info()
+server = addon.server.BlenderMCPServer()
+info = server.get_addon_info()
 assert info["addon_build_version"] == {RELEASE_VERSION!r}, info
 assert info["addon_version"] == {RELEASE_TUPLE!r}, info
 assert info["protocol_version"] == {PROTOCOL_VERSION!r}, info
@@ -249,10 +250,13 @@ assert runtime["background"] is True, runtime
 assert runtime["online_access"] is False, runtime
 assert runtime["file"]["path"] == bpy.data.filepath, runtime
 assert runtime["file"]["saved"] == bpy.data.is_saved, runtime
-assert runtime["file"]["dirty"] == bpy.data.is_dirty, runtime
+assert runtime["file"]["dirty"] is False, runtime
 assert runtime["scene"] == bpy.context.scene.name, runtime
 assert runtime["listener"]["running"] is False, runtime
 assert runtime["sketchfab"]["enabled"] is False, runtime
+created = server.execute_command({{"type": "execute_code", "params": {{"code": "for i in range(200):\\n    bpy.context.scene.collection.objects.link(bpy.data.objects.new(f'Dirty.{{i}}', None))"}}}})
+assert created["result"]["succeeded"], created
+assert server.get_addon_info()["runtime"]["file"]["dirty"] is True
 assert bpy.app.version >= {BLENDER_VERSION!r}
 assert Path(addon.sketchfab.requests.__file__).resolve().is_relative_to(Path({str(tmp_path)!r}).resolve()), addon.sketchfab.requests.__file__
 assert not bpy.app.online_access

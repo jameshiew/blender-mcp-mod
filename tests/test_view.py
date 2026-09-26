@@ -41,6 +41,50 @@ def test_camera_validates_before_context_access(view, options):
         module.set_camera("Camera", **options)
 
 
+def test_camera_changes_record_an_undo_step(view):
+    module, bpy = view
+    dof = SimpleNamespace(
+        use_dof=False,
+        focus_object=None,
+        focus_subtarget="",
+        focus_distance=10.0,
+        aperture_fstop=2.8,
+    )
+    data = SimpleNamespace(
+        name="Camera",
+        type="PERSP",
+        is_editable=True,
+        dof=dof,
+        clip_start=0.1,
+        clip_end=100.0,
+        **dict.fromkeys(
+            (
+                "panorama_type",
+                "lens",
+                "lens_unit",
+                "angle_x",
+                "angle_y",
+                "ortho_scale",
+                "sensor_fit",
+                "sensor_width",
+                "sensor_height",
+                "shift_x",
+                "shift_y",
+            )
+        ),
+    )
+    camera = SimpleNamespace(
+        name="Camera", type="CAMERA", data=data, is_editable=True, matrix_world=[]
+    )
+    bpy.context.scene.objects = {"Camera": camera}
+    bpy.context.scene.camera = None
+    with pytest.raises(ValueError, match="Camera not found"):
+        module.set_camera("Missing", lens=50)
+    assert bpy.ops.ed.undo_steps == []
+    assert module.set_camera("Camera", lens=50)["camera"]["lens"] == 50
+    assert bpy.ops.ed.undo_steps == ["MCP: Set Camera"]
+
+
 @pytest.mark.parametrize(
     "options",
     [

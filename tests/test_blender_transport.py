@@ -418,6 +418,10 @@ bpy.context.view_layer.update()
                 ]
                 == 1
             )
+
+            def dirty():
+                return call("get_addon_status", {})["runtime"]["file"]["dirty"]
+
             lifecycle_file = tmp_path / "lifecycle.blend"
             call(
                 "execute_blender_code",
@@ -425,6 +429,7 @@ bpy.context.view_layer.update()
                     "code": f"bpy.ops.wm.save_as_mainfile(filepath={str(lifecycle_file)!r}, copy=True, check_existing=False)"
                 },
             )
+            assert dirty()
             call(
                 "execute_blender_code",
                 {"code": "cached_scene = bpy.context.scene", "namespace": "lifecycle"},
@@ -435,6 +440,7 @@ bpy.context.view_layer.update()
                     "code": f"bpy.ops.wm.open_mainfile(filepath={str(lifecycle_file)!r}, load_ui=False, use_scripts=False)"
                 },
             )
+            assert not dirty()
             assert (
                 call(
                     "execute_blender_code",
@@ -445,6 +451,9 @@ bpy.context.view_layer.update()
                 )["result"]
                 == "False\n"
             )
+            assert dirty()
+            call("execute_blender_code", {"code": "bpy.ops.wm.save_mainfile()"})
+            assert not dirty()
             call(
                 "execute_blender_code",
                 {
@@ -460,11 +469,11 @@ bpy.context.view_layer.update()
                 call(
                     "execute_blender_code",
                     {
-                        "code": "print('cached_scene' in globals())",
+                        "code": "print('cached_scene' in globals(), bpy.ops.ed.redo.poll())",
                         "namespace": "lifecycle",
                     },
                 )["result"]
-                == "False\n"
+                == "False True\n"
             )
             print(
                 f"Native Blender {state['version']}: TLS authentication, Python namespaces/diagnostics, scene pagination, world transforms, and viewport capture passed"

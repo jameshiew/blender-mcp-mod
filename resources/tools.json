@@ -182,7 +182,7 @@
   },
   {
     "name": "execute_blender_code",
-    "description": "Run Python on Blender's main thread with bpy imported. Prefer bpy.data; bpy.ops can need mode, selection, or context overrides. Print results; stdout and stderr each keep 16,384 characters. Errors are not rolled back: check started, succeeded, and partial_changes (null means effects outside inspection are possible). A timeout does not stop execution, so inspect before retrying. checkpoint or summarize_changes adds an execution_id for get_execution_result.",
+    "description": "Run Python on Blender's main thread with bpy imported. Prefer bpy.data; bpy.ops can need mode, selection, or context overrides. Print results; stdout and stderr each keep 16,384 characters. Errors are not rolled back: check started, succeeded, and partial_changes (null means effects outside inspection are possible). A timeout does not stop execution, so inspect before retrying. Each started run adds one undo step. checkpoint or summarize_changes adds an execution_id for get_execution_result.",
     "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": true},
     "inputSchema": {
       "type": "object",
