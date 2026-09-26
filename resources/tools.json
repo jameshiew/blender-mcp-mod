@@ -7,14 +7,14 @@
   },
   {
     "name": "get_blender_api_info",
-    "description": "Inspect installed Blender RNA metadata before writing Python: a type's properties and functions (kind=TYPE, e.g. Camera) or an operator's parameters (kind=OPERATOR, e.g. mesh.primitive_cube_add). Reports defaults, ranges, enum items, and operator poll. Enum items are static, so context-dependent choices are missing. Does not read instance values or run operators.",
+    "description": "Inspect installed Blender RNA metadata before writing Python: a type's properties and functions (kind=TYPE, e.g. Camera) or an operator's parameters (kind=OPERATOR, e.g. mesh.primitive_cube_add). Reports defaults, ranges, enum items, and operator poll. Enum items are static, so context-dependent choices are missing. Node types (e.g. ShaderNodeMix) omit members common to all nodes and add a temporary node's sockets, menu items, and the settings that enable or use each socket. Does not read instance values or run operators.",
     "annotations": {"readOnlyHint": true, "openWorldHint": false},
     "inputSchema": {
       "type": "object",
       "properties": {
         "identifier": {"type": "string", "minLength": 1, "description": "bpy.types name or operator ID, without the bpy prefix."},
         "kind": {"type": "string", "enum": ["TYPE", "OPERATOR"], "default": "TYPE"},
-        "query": {"type": "string", "description": "Case-insensitive member name substring."},
+        "query": {"type": "string", "description": "Case-insensitive member or socket name substring."},
         "offset": {"type": "integer", "minimum": 0, "default": 0},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}
       },

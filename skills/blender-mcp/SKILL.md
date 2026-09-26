@@ -57,8 +57,10 @@ requested. External assets and simulation caches must remain available on disk.
 
 ## Blender 5.2 compositor
 
-In Blender 5.2, glare settings are input sockets. Inspect `node.inputs` before
-editing a node from a recipe for an older Blender release. For example, set
+In Blender 5.2, glare settings are input sockets. Before editing a node from a
+recipe for an older Blender release, look up its type with
+`get_blender_api_info` (for example, `CompositorNodeGlare`) to list its sockets,
+menu items, and the inputs that each menu item uses. For example, set
 `node.inputs["Type"].default_value = "Fog Glow"`; do not assign `glare_type`.
 
 For a new scene that has no compositor, this creates a glow pass:

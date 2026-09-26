@@ -338,6 +338,15 @@ bpy.context.view_layer.update()
             )
             assert not camera_image.get("isError"), camera_image
             assert camera_image["structuredContent"]["capture_mode"] == "CAMERA"
+            glare = call(
+                "get_blender_api_info",
+                {"identifier": "CompositorNodeGlare", "query": "type"},
+            )
+            assert "Fog Glow" in glare["node"]["inputs"][0]["menu_items"]
+            cryptomatte = call(
+                "get_blender_api_info", {"identifier": "CompositorNodeCryptomatteV2"}
+            )
+            assert cryptomatte["node"]["tree_types"] == ["CompositorNodeTree"]
             checks_path = Path(__file__).with_name("blender_view_checks.py")
             call(
                 "execute_blender_code",
