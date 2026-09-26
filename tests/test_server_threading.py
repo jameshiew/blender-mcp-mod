@@ -71,6 +71,14 @@ def _run_client(server, operation, deadline=5):
     return results[0]
 
 
+def _wait_until(server, predicate):
+    deadline = time.monotonic() + 3
+    while not predicate():
+        assert time.monotonic() < deadline
+        server._tick()
+        time.sleep(0.01)
+
+
 def _roundtrip(server):
     with _connect(server.port) as client:
         client.sendall(json.dumps({"type": "ping"}).encode())
@@ -104,7 +112,7 @@ def test_stop_closes_clients_and_unregisters_timer(server_class, timers):
     server = server_class(port=0)
     server.start()
     with socket.create_connection(("127.0.0.1", server.port), timeout=2) as client:
-        server._tick()
+        _wait_until(server, lambda: bool(server._clients))
         assert len(server._clients) == 1
         server.stop()
         assert not server._clients

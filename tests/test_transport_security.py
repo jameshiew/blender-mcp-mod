@@ -9,7 +9,7 @@ import time
 import pytest
 from conftest import client_tls_context, create_credentials
 from test_rust_server import Client
-from test_server_threading import _connect, _free_port, _run_client
+from test_server_threading import _connect, _free_port, _run_client, _wait_until
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +23,6 @@ def server(server_class):
         yield server
     finally:
         server.stop()
-
-
-def wait_until(server, predicate):
-    deadline = time.monotonic() + 3
-    while not predicate():
-        assert time.monotonic() < deadline
-        server._tick()
-        time.sleep(0.01)
 
 
 def assert_rejected(server, context=None):
@@ -59,7 +51,7 @@ def assert_rejected(server, context=None):
                 pass
 
     _run_client(server, send)
-    wait_until(server, lambda: not server._clients)
+    _wait_until(server, lambda: not server._clients)
     assert not commands
 
 
@@ -101,7 +93,7 @@ def test_stalled_handshakes_expire_and_do_not_block_valid_clients(server):
             assert stalled.recv(1) == b""
 
         _run_client(server, valid)
-    wait_until(server, lambda: not server._clients)
+    _wait_until(server, lambda: not server._clients)
 
 
 def test_unauthenticated_connection_count_is_bounded(server):
@@ -112,7 +104,7 @@ def test_unauthenticated_connection_count_is_bounded(server):
             clients.append(
                 socket.create_connection(("127.0.0.1", server.port), timeout=2)
             )
-            wait_until(server, lambda count=count: len(server._clients) == count)
+            _wait_until(server, lambda count=count: len(server._clients) == count)
         with socket.create_connection(
             ("127.0.0.1", server.port), timeout=2
         ) as rejected:
@@ -155,7 +147,7 @@ def test_setup_preserves_an_existing_pairing(binary, tmp_path):
 
 def test_stop_closes_an_incomplete_handshake(server):
     with socket.create_connection(("127.0.0.1", server.port), timeout=2) as stalled:
-        wait_until(server, lambda: bool(server._clients))
+        _wait_until(server, lambda: bool(server._clients))
         server.stop()
         assert stalled.recv(1) == b""
 
