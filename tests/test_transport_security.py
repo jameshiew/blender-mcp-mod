@@ -108,8 +108,7 @@ def test_unauthenticated_connection_count_is_bounded(server):
         with socket.create_connection(
             ("127.0.0.1", server.port), timeout=2
         ) as rejected:
-            server._tick()
-            assert rejected.recv(1) == b""
+            assert _run_client(server, lambda: rejected.recv(1)) == b""
         assert len(server._clients) == 2
     finally:
         for client in clients:
