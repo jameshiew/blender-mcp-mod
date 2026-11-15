@@ -1,11 +1,49 @@
 from __future__ import annotations
 
 import hashlib
+import ssl
+import sys
+import time
 import tomllib
+from http.client import IncompleteRead
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def download(url: str) -> bytes:
+    attempt = 1
+    while True:
+        try:
+            with urlopen(url, timeout=60) as response:
+                return response.read()
+        except (
+            URLError,
+            ConnectionError,
+            TimeoutError,
+            IncompleteRead,
+            ssl.SSLError,
+        ) as error:
+            if (
+                attempt >= 4
+                or isinstance(error, HTTPError)
+                and error.code not in {408, 429, 500, 502, 503, 504}
+                or isinstance(error, ssl.SSLCertVerificationError)
+                or isinstance(
+                    getattr(error, "reason", None), ssl.SSLCertVerificationError
+                )
+            ):
+                raise
+            delay = 2 ** (attempt - 1)
+            print(
+                f"Download failed ({error}); retrying in {delay}s",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(delay)
+            attempt += 1
 
 
 def main() -> None:
@@ -41,8 +79,8 @@ def main() -> None:
             and "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest() == expected
         ):
             continue
-        with urlopen(wheel["url"], timeout=60) as response:
-            data = response.read()
+        print(f"Downloading {target.name}", flush=True)
+        data = download(wheel["url"])
         if "sha256:" + hashlib.sha256(data).hexdigest() != expected:
             raise ValueError(f"Checksum mismatch for {target.name}")
         target.write_bytes(data)
