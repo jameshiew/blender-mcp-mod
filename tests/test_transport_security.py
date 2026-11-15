@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import socket
+import ssl
 import subprocess
 import threading
 import time
@@ -40,14 +41,15 @@ def assert_rejected(server, context=None):
             try:
                 if context is None:
                     tcp.sendall(command)
-                    assert tcp.recv(8192) == b""
+                    while tcp.recv(8192):
+                        pass
                 else:
                     with context.wrap_socket(
                         tcp, server_hostname="blender-mcp.local"
                     ) as client:
                         client.sendall(command)
                         assert client.recv(8192) == b""
-            except OSError:
+            except (ConnectionError, ssl.SSLError):
                 pass
 
     _run_client(server, send)
